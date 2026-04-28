@@ -1,0 +1,6 @@
+[
+  {"studyId":"S1","studyCode":"ST-001","customer":"ABC Pharma","legalEntity":"EU","plannedCompletionDate":"2026-04-10"},
+  {"studyId":"S2","studyCode":"ST-002","customer":"XYZ Labs","legalEntity":"EU","plannedCompletionDate":"2026-04-15"},
+  {"studyId":"S3","studyCode":"ST-003","customer":"BioTest","legalEntity":"US","plannedCompletionDate":"2026-04-20"},
+  {"studyId":"S4","studyCode":"ST-004","customer":"Delta Bio","legalEntity":"EU","plannedCompletionDate":null}
+]

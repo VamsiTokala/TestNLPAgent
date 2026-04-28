@@ -1,0 +1,1 @@
+export interface AssistantQueryResponse { planId: string; traceId: string; status: string; markdownPlan: string; jsonPlan: unknown; summary: { onTime: number; delayed: number; indeterminate: number; }; results: unknown[]; }
