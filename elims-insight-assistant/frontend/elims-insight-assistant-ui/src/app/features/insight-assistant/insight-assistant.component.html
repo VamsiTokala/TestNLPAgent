@@ -1,0 +1,20 @@
+<h1>eLIMS Insight Assistant</h1>
+<h3>Governed Natural-Language Analytics</h3>
+<div>
+  <label>Ask eLIMS</label>
+  <input [formControl]="form.controls.query" />
+  <button (click)="runQuery()">Run Query</button>
+</div>
+<div>
+  <button *ngFor="let ex of examples" (click)="setQuery(ex)">{{ ex }}</button>
+</div>
+<div *ngIf="response">
+  <h4>Summary</h4>
+  <p>On Time: {{response.summary?.onTime}} | Delayed: {{response.summary?.delayed}} | Indeterminate: {{response.summary?.indeterminate}}</p>
+  <h4>Results</h4>
+  <pre>{{ response.results | json }}</pre>
+  <h4>Generated Plan</h4>
+  <pre>{{ response.markdownPlan }}</pre>
+  <h4>JSON Execution Plan</h4>
+  <pre>{{ response.jsonPlan | json }}</pre>
+</div>

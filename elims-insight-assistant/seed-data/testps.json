@@ -1,0 +1,8 @@
+[
+  {"testpId":"T1","studyId":"S1","status":"Completed","completedAt":"2026-04-08T10:30:00Z","runType":"Production","result":"Pass"},
+  {"testpId":"T2","studyId":"S1","status":"Completed","completedAt":"2026-04-09T15:00:00Z","runType":"Production","result":"Pass"},
+  {"testpId":"T3","studyId":"S2","status":"Completed","completedAt":"2026-04-16T11:00:00Z","runType":"Production","result":"Pass"},
+  {"testpId":"T4","studyId":"S2","status":"Completed","completedAt":"2026-04-17T09:30:00Z","runType":"Production","result":"Pass"},
+  {"testpId":"T5","studyId":"S3","status":"Completed","completedAt":"2026-04-18T14:00:00Z","runType":"Production","result":"Pass"},
+  {"testpId":"T6","studyId":"S4","status":"Pending","completedAt":null,"runType":"Production","result":null}
+]
