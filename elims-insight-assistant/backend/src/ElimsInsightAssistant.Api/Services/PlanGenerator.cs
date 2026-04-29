@@ -9,7 +9,7 @@ public interface IPlanGenerator
 
 public class MockPlanGenerator : IPlanGenerator
 {
-    private static readonly string[] SupportedTerms = ["not completed on time", "delayed studies", "completed late", "not on time"];
+    private static readonly string[] SupportedTerms = ["not completed on time", "delayed studies", "completed late", "not on time", "indeterminate"];
 
     public (string markdown, ExecutionPlan? plan, string? error) Generate(string query)
     {
