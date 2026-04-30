@@ -10,7 +10,7 @@ public class DemoStudyServiceClient(IWebHostEnvironment env) : IStudyServiceClie
 {
     public async Task<List<StudyDto>> ListStudiesAsync()
     {
-        var file = Path.Combine(env.ContentRootPath, "..", "..", "..", "..", "seed-data", "studies.json");
+        var file = Path.Combine(env.ContentRootPath, "..", "..", "..", "seed-data", "studies.json");
         var json = await File.ReadAllTextAsync(Path.GetFullPath(file));
         return JsonSerializer.Deserialize<List<StudyDto>>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? [];
     }
@@ -20,7 +20,7 @@ public class DemoCoreLabsServiceClient(IWebHostEnvironment env) : ICoreLabsServi
 {
     public async Task<List<TestPDto>> ListTestPsAsync()
     {
-        var file = Path.Combine(env.ContentRootPath, "..", "..", "..", "..", "seed-data", "testps.json");
+        var file = Path.Combine(env.ContentRootPath, "..", "..", "..", "seed-data", "testps.json");
         var json = await File.ReadAllTextAsync(Path.GetFullPath(file));
         return JsonSerializer.Deserialize<List<TestPDto>>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? [];
     }
