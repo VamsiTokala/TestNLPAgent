@@ -1,27 +1,42 @@
 using System.Text.Json;
 using ElimsInsightAssistant.Api.Models;
+using Microsoft.Extensions.Logging;
 using OpenAI.Chat;
 
 namespace ElimsInsightAssistant.Api.Services;
 
+// ─── Result type ─────────────────────────────────────────────────────────────
+// Separates two distinct failure modes so the controller can respond correctly:
+//   IsServerError = false → query was understood but not supported (200 UnsupportedQuery)
+//   IsServerError = true  → transient failure: network, provider, parse error (503)
+
+public record PlanGeneratorResult(
+    string Markdown,
+    ExecutionPlan? Plan,
+    string? Error,
+    bool IsServerError = false);
+
+// ─── Interface ────────────────────────────────────────────────────────────────
+
 public interface IPlanGenerator
 {
-    Task<(string markdown, ExecutionPlan? plan, string? error)> GenerateAsync(string query);
+    Task<PlanGeneratorResult> GenerateAsync(string query);
 }
 
-// ─── Mock (no API key required — used for local dev and tests) ───────────────
+// ─── Mock (no API key required — local dev and tests) ────────────────────────
 
 public class MockPlanGenerator : IPlanGenerator
 {
     private static readonly string[] SupportedTerms =
         ["not completed on time", "delayed studies", "completed late", "not on time", "indeterminate"];
 
-    public Task<(string markdown, ExecutionPlan? plan, string? error)> GenerateAsync(string query)
+    public Task<PlanGeneratorResult> GenerateAsync(string query)
     {
         var q = query.ToLowerInvariant();
         if (!SupportedTerms.Any(q.Contains))
-            return Task.FromResult((string.Empty, (ExecutionPlan?)null,
-                (string?)"This demo currently supports queries related to study completion timeliness."));
+            return Task.FromResult(new PlanGeneratorResult(
+                string.Empty, null,
+                "This demo currently supports queries related to study completion timeliness."));
 
         var markdown = """
 # Analysis Plan
@@ -59,102 +74,133 @@ Read-only, deterministic, approved service contracts only.
             ]
         };
 
-        return Task.FromResult((markdown, (ExecutionPlan?)plan, (string?)null));
+        return Task.FromResult(new PlanGeneratorResult(markdown, plan, null));
     }
 }
 
-// ─── OpenAI (real NL intent extraction) ──────────────────────────────────────
+// ─── OpenAI (real NL intent extraction with strict JSON schema output) ────────
 
 public class OpenAiPlanGenerator : IPlanGenerator
 {
     private readonly ChatClient _client;
+    private readonly ILogger<OpenAiPlanGenerator> _logger;
 
-    // System prompt teaches the model the exact JSON shape we expect back.
-    // The validator is the safety net — but we also constrain the model to
-    // only the allowed services/fields so it produces valid plans by default.
+    // Strict JSON schema constrains the model's output to exactly the shape we need.
+    // This eliminates the need to handle free-form text, markdown fences, or partial responses.
+    // The validator still runs after — this is defence in depth, not a replacement.
+    private static readonly BinaryData ResponseSchema = BinaryData.FromString("""
+    {
+      "type": "object",
+      "properties": {
+        "supported": { "type": "boolean" },
+        "reason":   { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "markdown": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "plan": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "version":  { "type": "string" },
+                "intent":   { "type": "string" },
+                "entities": { "type": "array", "items": { "type": "string" } },
+                "operations": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "service": { "type": "string" },
+                      "action":  { "type": "string" },
+                      "select":  { "type": "array", "items": { "type": "string" } },
+                      "filters": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "field": { "type": "string" },
+                            "op":    { "type": "string" },
+                            "value": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+                          },
+                          "required": ["field", "op", "value"],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "required": ["service", "action", "select", "filters"],
+                    "additionalProperties": false
+                  }
+                },
+                "limits": {
+                  "type": "object",
+                  "properties": {
+                    "maxRows":    { "type": "integer" },
+                    "pagination": { "type": "boolean" }
+                  },
+                  "required": ["maxRows", "pagination"],
+                  "additionalProperties": false
+                }
+              },
+              "required": ["version", "intent", "entities", "operations", "limits"],
+              "additionalProperties": false
+            },
+            { "type": "null" }
+          ]
+        }
+      },
+      "required": ["supported", "reason", "markdown", "plan"],
+      "additionalProperties": false
+    }
+    """);
+
     private const string SystemPrompt = """
 You are a governed analytics plan generator for a laboratory information management system (LIMS).
 
 Given a natural language query, decide whether it is asking about study completion timeliness
-(delayed studies, not completed on time, late, overdue, indeterminate completion, etc.).
+(delayed studies, not completed on time, late, overdue, indeterminate completion, missed deadline, etc.).
 
 ALLOWED SERVICES AND FIELDS:
-  study-service    → action: listStudies  → fields: studyId, studyCode, customer, legalEntity, plannedCompletionDate
+  study-service    → action: listStudies → fields: studyId, studyCode, customer, legalEntity, plannedCompletionDate
   corelabs-service → action: listTestPs  → fields: testpId, studyId, status, completedAt, runType, result
 
 ALLOWED FILTER OPERATORS: =, !=, >, >=, <, <=, in, between, is null, is not null
 ALLOWED AGGREGATE FUNCTIONS: max, min, count, sum, avg
 MAX ROWS LIMIT: 500
 
-If the query IS about study completion timeliness, respond with this JSON (no markdown fences, no extra text):
-{
-  "supported": true,
-  "markdown": "# Analysis Plan\nIntent: <one line intent>\n\n## Steps\n1. ...\n\n## Execution mode\nRead-only, deterministic, approved service contracts only.",
-  "plan": {
-    "version": "1.0",
-    "intent": "find_studies_not_completed_on_time",
-    "entities": ["study", "testp"],
-    "operations": [
-      {
-        "service": "study-service",
-        "action": "listStudies",
-        "select": ["studyId", "studyCode", "customer", "legalEntity", "plannedCompletionDate"],
-        "filters": []
-      },
-      {
-        "service": "corelabs-service",
-        "action": "listTestPs",
-        "select": ["testpId", "studyId", "status", "completedAt", "runType", "result"],
-        "filters": [{ "field": "status", "op": "=", "value": "Completed" }]
-      }
-    ],
-    "correlate": { "leftEntity": "study", "rightEntity": "testp", "leftField": "studyId", "rightField": "studyId" },
-    "transform": {
-      "groupBy": ["studyId"],
-      "aggregates": [{ "field": "completedAt", "fn": "max", "as": "actualCompletionDate" }]
-    },
-    "classify": {
-      "onTime": "actualCompletionDate <= plannedCompletionDate",
-      "delayed": "actualCompletionDate > plannedCompletionDate",
-      "indeterminate": "plannedCompletionDate is null OR actualCompletionDate is null"
-    },
-    "output": {
-      "includeClassifications": ["Delayed", "Indeterminate"],
-      "columns": ["studyId", "studyCode", "customer", "plannedCompletionDate", "actualCompletionDate", "classification", "reason", "dataQualityFlags"]
-    },
-    "limits": { "maxRows": 500, "pagination": true }
-  }
-}
+If the query IS about study completion timeliness:
+  - Set supported = true
+  - Set reason = null
+  - Write a clear markdown plan explaining the steps
+  - Populate plan with version "1.0", intent "find_studies_not_completed_on_time", the two operations, and limits maxRows 500
 
-If the query is NOT about study completion timeliness, respond with:
-{ "supported": false, "reason": "<one sentence explanation>" }
-
-Return ONLY valid JSON. No markdown fences. No extra text before or after.
+If the query is NOT about study completion timeliness:
+  - Set supported = false
+  - Set reason to a one-sentence explanation
+  - Set markdown = null and plan = null
 """;
 
-    public OpenAiPlanGenerator(IConfiguration config)
+    public OpenAiPlanGenerator(IConfiguration config, ILogger<OpenAiPlanGenerator> logger)
     {
+        _logger = logger;
         var apiKey = config["OpenAI:ApiKey"]
             ?? throw new InvalidOperationException(
-                "OpenAI:ApiKey is not configured. Set it via environment variable OpenAI__ApiKey " +
-                "or dotnet user-secrets set \"OpenAI:ApiKey\" \"sk-...\"");
+                "OpenAI:ApiKey is not configured. " +
+                "Set via: dotnet user-secrets set \"OpenAI:ApiKey\" \"sk-...\" " +
+                "or env var OpenAI__ApiKey");
 
-        // gpt-4o-mini: fast, cheap, reliable JSON output — good fit for structured plan generation
         _client = new ChatClient("gpt-4o-mini", apiKey);
     }
 
-    public async Task<(string markdown, ExecutionPlan? plan, string? error)> GenerateAsync(string query)
+    public async Task<PlanGeneratorResult> GenerateAsync(string query)
     {
         try
         {
             var completion = await _client.CompleteChatAsync(
-                [
-                    new SystemChatMessage(SystemPrompt),
-                    new UserChatMessage(query)
-                ],
+                [new SystemChatMessage(SystemPrompt), new UserChatMessage(query)],
                 new ChatCompletionOptions
                 {
-                    ResponseFormat = ChatResponseFormat.CreateJsonObjectFormat()
+                    // Strict schema: model output is guaranteed to match ResponseSchema.
+                    // Eliminates free-form text, markdown fences, missing fields.
+                    ResponseFormat = ChatResponseFormat.CreateJsonSchemaFormat(
+                        "plan_response", ResponseSchema, jsonSchemaIsStrict: true)
                 });
 
             var json = completion.Value.Content[0].Text;
@@ -163,28 +209,38 @@ Return ONLY valid JSON. No markdown fences. No extra text before or after.
 
             if (!root.GetProperty("supported").GetBoolean())
             {
-                var reason = root.TryGetProperty("reason", out var r)
-                    ? r.GetString()
-                    : "Query not supported by this assistant.";
-                return (string.Empty, null, reason);
+                var reason = root.GetProperty("reason").GetString()
+                             ?? "Query not supported by this assistant.";
+                return new PlanGeneratorResult(string.Empty, null, reason);
             }
 
             var markdown = root.GetProperty("markdown").GetString() ?? string.Empty;
-            var planJson = root.GetProperty("plan").GetRawText();
-            var plan = JsonSerializer.Deserialize<ExecutionPlan>(planJson,
+            var plan = JsonSerializer.Deserialize<ExecutionPlan>(
+                root.GetProperty("plan").GetRawText(),
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
-            return plan is null
-                ? (string.Empty, null, "Failed to parse execution plan from AI response.")
-                : (markdown, plan, null);
+            if (plan is null)
+            {
+                _logger.LogError("OpenAI returned supported=true but plan deserialised to null. Raw: {Json}", json);
+                return new PlanGeneratorResult(string.Empty, null,
+                    "Plan generation service returned an unexpected response.", IsServerError: true);
+            }
+
+            return new PlanGeneratorResult(markdown, plan, null);
         }
         catch (JsonException ex)
         {
-            return (string.Empty, null, $"AI returned invalid JSON: {ex.Message}");
+            // Strict schema mode makes this very unlikely — log for investigation
+            _logger.LogError(ex, "OpenAI response failed JSON parse for query: {Query}", query);
+            return new PlanGeneratorResult(string.Empty, null,
+                "Plan generation service returned an unreadable response.", IsServerError: true);
         }
         catch (Exception ex)
         {
-            return (string.Empty, null, $"AI plan generation failed: {ex.Message}");
+            // Network error, provider outage, auth failure — retryable by the client
+            _logger.LogError(ex, "OpenAI call failed for query: {Query}", query);
+            return new PlanGeneratorResult(string.Empty, null,
+                "Plan generation service is temporarily unavailable.", IsServerError: true);
         }
     }
 }
