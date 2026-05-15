@@ -64,7 +64,8 @@ dotnet test
 ### 4. Frontend
 ```bash
 cd elims-insight-assistant/frontend/elims-insight-assistant-ui
-ng serve
+npm install        # first time only — installs Angular 21 + dependencies
+npx ng serve       # starts dev server at http://localhost:4200
 ```
 
 ## Try It — Example Request

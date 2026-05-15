@@ -1463,32 +1463,82 @@ for tests: start with a known-good object and make exactly one change per test.
 
 ## Part 13 — Build the Angular Frontend
 
-### 13.1 Create the Angular app
+> **Note:** Angular 21 (the version used here) defaults to **standalone components** —
+> there is no NgModule. Every component declares its own dependencies in an `imports`
+> array inside the `@Component` decorator. The full scaffold (all files below) already
+> exists in the repository. This section explains what each file does and why.
 
-In a new terminal, navigate to the `frontend` folder and run:
+### 13.1 Project scaffold — what the files are
 
-```bash
-ng new elims-insight-assistant-ui --routing=false --style=scss --standalone=false
-cd elims-insight-assistant-ui
+The scaffold was created for you. The key files are:
+
+```
+frontend/elims-insight-assistant-ui/
+├── angular.json          ← build + serve config (uses @angular/build esbuild builder)
+├── package.json          ← npm dependencies
+├── tsconfig.json         ← TypeScript compiler settings (strict mode)
+├── tsconfig.app.json     ← extends tsconfig.json, targets src/main.ts
+├── proxy.conf.json       ← dev proxy: /api → http://localhost:5000
+├── src/
+│   ├── index.html        ← single HTML page, contains <app-root>
+│   ├── main.ts           ← entry point — bootstraps AppComponent
+│   ├── styles.scss       ← global CSS
+│   └── app/
+│       ├── app.component.ts          ← root component, renders <app-insight-assistant>
+│       └── features/insight-assistant/
+│           ├── insight-assistant.component.ts   ← main UI logic
+│           ├── insight-assistant.component.html ← template
+│           ├── insight-assistant.component.scss ← styles
+│           ├── models/                          ← TypeScript interfaces
+│           └── services/
+│               └── insight-assistant-api.service.ts
 ```
 
-**What `ng new` creates:**
-- `src/app/` — your application components
-- `angular.json` — build configuration
-- `package.json` — npm dependencies
-- `tsconfig.json` — TypeScript compiler settings
+**Why no NgModule?**
+In Angular 17+, the framework made standalone the default. Instead of a
+central `AppModule` that lists every component, each component lists its own
+dependencies in `imports: [...]`. This removes a layer of indirection that
+confused beginners and led to "why isn't my component declared?" errors.
 
-### 13.2 Create the Feature Module
+### 13.2 Entry point — `src/main.ts`
 
-```bash
-ng generate module features/insight-assistant
-ng generate component features/insight-assistant
-ng generate service features/insight-assistant/services/insight-assistant-api
+```typescript
+import { bootstrapApplication } from '@angular/platform-browser';
+import { provideHttpClient } from '@angular/common/http';
+import { AppComponent } from './app/app.component';
+
+bootstrapApplication(AppComponent, {
+  providers: [provideHttpClient()]
+}).catch(err => console.error(err));
 ```
 
-### 13.3 Create the Models
+**What this does:**
+- `bootstrapApplication` starts Angular with a standalone root component — no NgModule needed.
+- `provideHttpClient()` registers Angular's HTTP client so any component or service can inject it.
 
-Create `src/app/features/insight-assistant/models/assistant-query-request.model.ts`:
+### 13.3 Root component — `src/app/app.component.ts`
+
+```typescript
+import { Component } from '@angular/core';
+import { InsightAssistantComponent } from './features/insight-assistant/insight-assistant.component';
+
+@Component({
+  selector: 'app-root',
+  imports: [InsightAssistantComponent],
+  template: '<app-insight-assistant></app-insight-assistant>'
+})
+export class AppComponent {}
+```
+
+**Key points:**
+- `imports: [InsightAssistantComponent]` — the standalone way to use another component.
+  In NgModule apps this was done in a module's `declarations` array; now each component
+  does it itself.
+- The template just renders the feature component as a full-page app.
+
+### 13.4 Create the Models
+
+`src/app/features/insight-assistant/models/assistant-query-request.model.ts`:
 ```typescript
 export interface UserContext {
   userId: string;
@@ -1502,7 +1552,7 @@ export interface AssistantQueryRequest {
 }
 ```
 
-Create `src/app/features/insight-assistant/models/study-completion-result.model.ts`:
+`src/app/features/insight-assistant/models/study-completion-result.model.ts`:
 ```typescript
 export interface StudyCompletionResult {
   studyId: string;
@@ -1516,19 +1566,48 @@ export interface StudyCompletionResult {
 }
 ```
 
-### 13.4 Create the API Service
+`src/app/features/insight-assistant/models/assistant-query-response.model.ts`:
+```typescript
+import { ExecutionPlan } from './execution-plan.model';
+import { StudyCompletionResult } from './study-completion-result.model';
+
+export interface ValidationCheck { name: string; status: string; }
+export interface ValidationResult { status: string; checks: ValidationCheck[]; errors: string[]; }
+export interface QuerySummary { onTime: number; delayed: number; indeterminate: number; }
+
+export interface AssistantQueryResponse {
+  planId: string;
+  traceId: string;
+  status: string;
+  markdownPlan: string;
+  jsonPlan: ExecutionPlan;
+  validation: ValidationResult;
+  summary: QuerySummary;
+  results: StudyCompletionResult[];
+  message: string;
+}
+```
+
+**Why typed models matter:**
+If you leave `response` typed as `any`, TypeScript cannot catch a typo like
+`response.sumarry.onTime` at build time — it only blows up at runtime in the browser.
+Typed models give you autocomplete and catch mistakes before the user sees them.
+
+### 13.5 Create the API Service
 
 `src/app/features/insight-assistant/services/insight-assistant-api.service.ts`:
 ```typescript
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
+import { Observable } from 'rxjs';
+import { AssistantQueryResponse } from '../models/assistant-query-response.model';
 
 @Injectable({ providedIn: 'root' })
 export class InsightAssistantApiService {
   constructor(private http: HttpClient) {}
 
-  query(query: string) {
-    return this.http.post('/api/assistant/query', {
+  query(query: string): Observable<AssistantQueryResponse> {
+    return this.http.post<AssistantQueryResponse>('/api/assistant/query', {
       query,
       userContext: {
         userId: 'demo-user',
@@ -1540,42 +1619,87 @@ export class InsightAssistantApiService {
 }
 ```
 
+**Why `http.post<AssistantQueryResponse>()` not just `http.post()`?**
+Without the generic type parameter, `post()` returns `Observable<Object>`.
+The subscribe callback parameter `r` becomes type `Object` — TypeScript cannot
+know what fields it has, so it flags `r => this.response = r` as
+`TS7006: Parameter 'r' implicitly has an 'any' type`.
+Adding `<AssistantQueryResponse>` tells TypeScript exactly what the response
+shape is, giving you type safety all the way from HTTP call to template.
+
 **Concept — Angular Services and `HttpClient`:**
 A service is a class that holds logic shared across components. `HttpClient` makes
 HTTP calls to the backend. `@Injectable({ providedIn: 'root' })` registers it with
 Angular's DI container as a singleton — available everywhere in the app.
 
-### 13.5 Create the Component
+### 13.6 Create the Component
 
 `src/app/features/insight-assistant/insight-assistant.component.ts`:
 ```typescript
 import { Component } from '@angular/core';
-import { FormBuilder } from '@angular/forms';
+import { FormBuilder, FormControl, FormGroup, ReactiveFormsModule } from '@angular/forms';
+import { NgFor, NgIf, JsonPipe } from '@angular/common';
 import { InsightAssistantApiService } from './services/insight-assistant-api.service';
+import { AssistantQueryResponse } from './models/assistant-query-response.model';
 
 @Component({
   selector: 'app-insight-assistant',
   templateUrl: './insight-assistant.component.html',
-  styleUrls: ['./insight-assistant.component.scss']
+  styleUrls: ['./insight-assistant.component.scss'],
+  imports: [ReactiveFormsModule, NgFor, NgIf, JsonPipe]
 })
 export class InsightAssistantComponent {
   examples = [
     'Find studies not completed on time',
     'Show delayed studies',
-    'Show indeterminate studies'
+    'Show indeterminate studies',
+    'Show completed late studies'
   ];
-  response: any;
-  form = this.fb.group({ query: ['Find studies not completed on time'] });
 
-  constructor(private fb: FormBuilder, private api: InsightAssistantApiService) {}
+  response: AssistantQueryResponse | null = null;
+  form: FormGroup;
+
+  get queryControl(): FormControl { return this.form.get('query') as FormControl; }
+
+  constructor(private fb: FormBuilder, private api: InsightAssistantApiService) {
+    // form must be initialised here, not as a class field initialiser.
+    // Class fields run before Angular fills in constructor-injected values,
+    // so `this.fb` would be undefined at field initialisation time (TS2729).
+    this.form = this.fb.group({ query: ['Find studies not completed on time'] });
+  }
 
   runQuery(): void {
-    this.api.query(this.form.value.query || '').subscribe(r => this.response = r);
+    this.api.query(this.form.value.query || '').subscribe(
+      (r: AssistantQueryResponse) => { this.response = r; }
+    );
   }
 
   setQuery(q: string): void { this.form.patchValue({ query: q }); }
 }
 ```
+
+**Three important patterns explained:**
+
+**1. Standalone `imports` array**
+`imports: [ReactiveFormsModule, NgFor, NgIf, JsonPipe]` inside `@Component` replaces
+the old NgModule declaration. The component is self-contained — it declares everything
+it needs, making it easy to move or reuse.
+
+**2. `queryControl` getter (fixes TS2739 / TS4111)**
+`[formControl]="form.controls.query"` fails in strict TypeScript because
+`FormGroup.controls` returns `AbstractControl`, which is missing properties
+that `[formControl]` requires (`FormControl`-specific members). It also triggers
+`TS4111` because the property comes from an index signature.
+The getter returns an explicitly typed `FormControl`, satisfying both errors:
+```typescript
+get queryControl(): FormControl { return this.form.get('query') as FormControl; }
+```
+
+**3. `form` initialised in constructor (fixes TS2729)**
+Class field initialisers (`form = this.fb.group(...)`) run **before** Angular
+populates constructor parameters, so `this.fb` is `undefined` at that point.
+Moving the assignment into the constructor body runs it **after** Angular has
+injected `fb`.
 
 `src/app/features/insight-assistant/insight-assistant.component.html`:
 ```html
@@ -1584,7 +1708,7 @@ export class InsightAssistantComponent {
 
 <div>
   <label>Ask eLIMS</label>
-  <input [formControl]="form.controls.query" />
+  <input [formControl]="queryControl" />
   <button (click)="runQuery()">Run Query</button>
 </div>
 
@@ -1594,53 +1718,88 @@ export class InsightAssistantComponent {
 
 <div *ngIf="response">
   <h4>Summary</h4>
-  <p>
-    On Time: {{ response.summary?.onTime }} |
-    Delayed: {{ response.summary?.delayed }} |
-    Indeterminate: {{ response.summary?.indeterminate }}
-  </p>
+  <p>On Time: {{response.summary.onTime}} | Delayed: {{response.summary.delayed}} | Indeterminate: {{response.summary.indeterminate}}</p>
   <h4>Results</h4>
   <pre>{{ response.results | json }}</pre>
   <h4>Generated Plan</h4>
   <pre>{{ response.markdownPlan }}</pre>
+  <h4>JSON Execution Plan</h4>
+  <pre>{{ response.jsonPlan | json }}</pre>
 </div>
 ```
 
 **Concept — Angular Data Binding:**
-- `[formControl]="..."` — binds an input to a reactive form control (two-way)
+- `[formControl]="queryControl"` — binds the input to the typed form control
 - `(click)="runQuery()"` — calls a method when the button is clicked
-- `{{ response.summary?.onTime }}` — displays a value; `?.` safely handles null
+- `{{response.summary.onTime}}` — displays a value; no `?.` needed here because
+  the whole block is inside `*ngIf="response"` which guarantees `response` is non-null
 - `*ngFor="let ex of examples"` — loops and creates one button per item
 - `*ngIf="response"` — only shows this section when response is not null
-- `| json` — pipe: transforms the value (pretty-prints an object as JSON)
+- `| json` — pipe: pretty-prints an object as JSON
 
-### 13.6 Add Proxy for Local Development
+### 13.7 Install dependencies
 
-When Angular runs on port 4200 and the API on port 5000, the browser blocks
-cross-origin requests. A proxy forwards Angular's API calls to the backend.
+```bash
+cd elims-insight-assistant/frontend/elims-insight-assistant-ui
+npm install
+```
 
-Create `src/proxy.conf.json`:
+This installs Angular 21, RxJS, zone.js, and the esbuild build tooling into `node_modules/`.
+`node_modules/` is listed in `.gitignore` and is never committed — every developer runs
+`npm install` after cloning.
+
+### 13.8 Proxy for local development
+
+When Angular runs on port 4200 and the API runs on port 5000, the browser blocks
+cross-origin requests. The proxy forwards Angular's `/api` calls to the backend
+so the browser never sees a cross-origin request.
+
+`proxy.conf.json` (at the project root, **not** inside `src/`):
 ```json
 {
   "/api": {
     "target": "http://localhost:5000",
-    "secure": false
+    "secure": false,
+    "changeOrigin": true
   }
 }
 ```
 
-In `angular.json` under `serve > options`, add:
+`angular.json` wires this in under `projects > ... > architect > serve > options`:
 ```json
-"proxyConfig": "src/proxy.conf.json"
+"options": {
+  "proxyConfig": "proxy.conf.json"
+}
 ```
 
-### 13.7 Run the Frontend
+### 13.9 Build and run the frontend
 
+**Build once (check for compile errors):**
 ```bash
-ng serve
+npx ng build --configuration development
 ```
+A clean build outputs something like:
+```
+✔ Building...
+main.js      | 1.29 MB
+polyfills.js | 92.95 kB
+styles.css   | 156 bytes
+Application bundle generation complete.
+```
+Zero errors means all TypeScript and template type checks passed.
 
+**Run with live reload:**
+```bash
+npx ng serve
+```
 Open http://localhost:4200 in your browser.
+The `ng serve` output shows:
+```
+✔ Building...
+Watch mode enabled. Watching for file changes...
+  ➜  Local: http://localhost:4200/
+```
+Any file change triggers an instant rebuild without restarting the server.
 
 ---
 
@@ -1752,8 +1911,11 @@ dotnet test --verbosity normal
 | **ConcurrentDictionary** | Thread-safe dictionary for multi-request environments | AuditService |
 | **xUnit [Fact]** | Mark a method as a test | All test classes |
 | **Angular Component** | A reusable UI block with HTML + TypeScript | InsightAssistantComponent |
+| **Standalone Component** | Component that declares its own imports — no NgModule needed | Angular 17+ default; `imports: [...]` inside `@Component` |
 | **Angular Service** | Shared logic injected into components | InsightAssistantApiService |
 | **Data Binding** | Connect UI to code automatically | Component HTML template |
+| **`queryControl` getter** | Typed accessor for a form field — converts `AbstractControl` to `FormControl` to satisfy strict template type checking | `get queryControl(): FormControl` |
+| **Generic `http.post<T>()`** | Tells TypeScript the shape of the HTTP response — prevents implicit `any` on subscribe callbacks | `http.post<AssistantQueryResponse>(...)` |
 | **Proxy Config** | Forward Angular dev requests to the API | proxy.conf.json |
 | **OpenAI ChatClient** | Send a prompt, get a structured response | OpenAiPlanGenerator |
 | **Structured Outputs** | Schema-constrained JSON enforced by provider, not just prompted | `CreateJsonSchemaFormat` |
@@ -1784,8 +1946,29 @@ Check `legalEntities` in your request. The EU seed data requires `"EU"` in the l
 S3 (BioTest) is a US entity and will only appear if `"US"` is included.
 
 **Angular blank page**
-Ensure the proxy is configured and both the API and `ng serve` are running.
-Check the browser console (F12) for error messages.
+Ensure both the backend (`dotnet run`) and frontend (`npx ng serve`) are running.
+Check the browser console (F12) for error messages. Common causes:
+- Backend not running → proxy returns 502; check `dotnet run` terminal
+- `npm install` not run → `node_modules/` missing; run it first
+- Wrong port → proxy targets `http://localhost:5000`; confirm backend listens there
+
+**`TS7006: Parameter 'r' implicitly has an 'any' type`**
+The `http.post()` call is missing its generic type parameter.
+Change `this.http.post(...)` to `this.http.post<AssistantQueryResponse>(...)`.
+Without it, the response is typed as `Object` and the subscribe callback is untyped.
+
+**`TS2729: Property used before its initialization`**
+`this.fb.group(...)` is used as a class field initialiser but `fb` is injected in
+the constructor — at field-init time it is still `undefined`.
+Move `this.form = this.fb.group(...)` inside the constructor body.
+
+**`TS2739 / TS4111` on `form.controls.query` in template**
+`FormGroup.controls` returns `AbstractControl` which lacks `FormControl`-specific
+members. Add a getter:
+```typescript
+get queryControl(): FormControl { return this.form.get('query') as FormControl; }
+```
+Then use `[formControl]="queryControl"` in the template.
 
 **API returns HTTP 503 "Plan generation service is temporarily unavailable"**
 This is a transient OpenAI failure (network, provider outage, invalid API key).
