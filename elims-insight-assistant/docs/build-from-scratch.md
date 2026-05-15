@@ -1,0 +1,1649 @@
+# Build eLIMS Insight Assistant From Scratch
+### A Complete Beginner's Guide — VS Code · .NET 8 · Angular
+
+---
+
+## Who This Guide Is For
+
+This guide is written for someone who:
+- Has never built a web application before
+- Has never used Visual Studio Code, .NET, or Angular
+- Wants to understand **why** decisions are made, not just **what** to type
+
+By the end you will have built a working API that accepts plain-English questions like
+*"show me studies not completed on time"* and returns structured, validated, audited results.
+
+---
+
+## What We Are Building
+
+**eLIMS Insight Assistant** is a governed natural-language analytics tool for a
+laboratory information management system. In plain English:
+
+> A user types a question. The system turns it into a safe, validated plan.
+> The plan is checked before anything runs. Results are returned and logged.
+
+### Why Does It Work This Way?
+
+In regulated industries (pharma, biotech) you cannot let an AI freely query databases.
+Every query must be:
+- **Predictable** — same input always produces same plan
+- **Safe** — only approved data fields and services are accessible
+- **Auditable** — every query, who ran it, and what it returned is recorded
+
+This is why we do **not** let an AI directly execute queries. Instead:
+
+```
+User types question
+      ↓
+Plan Generator creates a structured JSON plan
+      ↓
+Validator checks the plan against an allowlist
+      ↓
+Execution Engine runs the approved plan
+      ↓
+Audit Service records everything
+      ↓
+Results returned to user
+```
+
+---
+
+## Part 1 — Install Your Tools
+
+### 1.1 Visual Studio Code (the editor)
+
+**What it is:** A free text editor made by Microsoft, purpose-built for writing code.
+It has syntax highlighting, autocomplete, a built-in terminal, and extensions for every language.
+
+**Install:**
+1. Go to https://code.visualstudio.com
+2. Click **Download** — it detects your OS automatically
+3. Run the installer with all defaults
+4. When you see **"Add to PATH"**, make sure it is checked
+
+**Verify:** Open a terminal, type `code --version`. You should see a version number.
+
+> **What is a terminal?**
+> Windows: Press `Win` key → type `cmd` → press Enter
+> Mac: Press `Cmd+Space` → type `terminal` → press Enter
+> It is a text-based window where you control your computer by typing commands.
+
+---
+
+### 1.2 .NET 8 SDK (the backend language runtime)
+
+**What it is:** .NET is Microsoft's platform for building applications. The SDK (Software
+Development Kit) includes everything needed to write, build, and run C# code.
+C# is the language our backend API is written in.
+
+**Why C# and .NET?**
+- Strongly typed — the compiler catches mistakes before the program runs
+- Excellent for building web APIs (ASP.NET Core)
+- Used widely in enterprise and regulated industries
+
+**Install:**
+1. Go to https://dotnet.microsoft.com/download/dotnet/8.0
+2. Click **Download SDK** under .NET 8.0
+3. Run the installer with all defaults
+
+**Verify:**
+```
+dotnet --version
+```
+Expected output: `8.0.xxx`
+
+---
+
+### 1.3 Node.js and npm (needed for Angular)
+
+**What it is:** Node.js lets you run JavaScript outside a browser. npm (Node Package
+Manager) is its package installer — similar to an app store for code libraries.
+
+**Why do we need it for Angular?**
+Angular is a frontend framework written in TypeScript. TypeScript needs to be
+compiled into JavaScript. Node.js runs the Angular build tools that do this compilation.
+
+**Install:**
+1. Go to https://nodejs.org
+2. Click the **LTS** button (Long Term Support — the stable version)
+3. Run installer with all defaults
+
+**Verify:**
+```
+node --version
+npm --version
+```
+
+---
+
+### 1.4 Angular CLI
+
+**What it is:** A command-line tool that creates, builds, and runs Angular applications.
+CLI stands for Command Line Interface.
+
+**Install** (in your terminal):
+```
+npm install -g @angular/cli
+```
+
+The `-g` flag means "install globally" — available from any folder on your computer.
+
+**Verify:**
+```
+ng version
+```
+
+---
+
+### 1.5 VS Code Extensions
+
+Open VS Code. Click the **Extensions icon** in the left sidebar (four squares icon).
+Search and install each:
+
+| Extension | Purpose |
+|---|---|
+| **C# Dev Kit** (`ms-dotnettools.csdevkit`) | C# syntax, autocomplete, run/debug |
+| **.NET Core Test Explorer** (`formulahendry.dotnet-test-explorer`) | Run tests with a click |
+| **Angular Language Service** (`angular.ng-template`) | Angular HTML autocomplete |
+| **REST Client** (`humao.rest-client`) | Test your API without leaving VS Code |
+
+---
+
+## Part 2 — Understand the Project Structure
+
+Before writing a single line of code, understand what you are building and why it is
+organised this way.
+
+```
+elims-insight-assistant/
+├── backend/
+│   └── src/
+│       ├── ElimsInsightAssistant.Api/       ← The web API (what users call)
+│       │   ├── Controllers/                 ← HTTP entry points
+│       │   ├── Services/                    ← Business logic
+│       │   ├── Models/                      ← Data shapes
+│       │   ├── Validation/                  ← Safety checking
+│       │   ├── Execution/                   ← Running the plan
+│       │   ├── Audit/                       ← Recording history
+│       │   └── Program.cs                   ← Application startup
+│       └── ElimsInsightAssistant.Tests/     ← Automated tests
+├── frontend/
+│   └── elims-insight-assistant-ui/          ← Angular web UI
+└── seed-data/
+    ├── studies.json                         ← Demo study records
+    └── testps.json                          ← Demo test plan records
+```
+
+**Why separate backend and frontend?**
+
+The backend (API) and frontend (UI) are kept separate because:
+- They use different languages (C# vs TypeScript)
+- They can be deployed independently
+- Multiple frontends (web, mobile) can share the same backend
+- Teams can work on them simultaneously
+
+**Why separate folders inside the API?**
+
+Each folder has a single responsibility. This is called **Separation of Concerns** —
+one of the most important principles in software design:
+
+- `Controllers` — only handle incoming HTTP requests and return responses
+- `Services` — only contain business logic (the "thinking" code)
+- `Models` — only define what data looks like
+- `Validation` — only check whether a plan is safe
+- `Execution` — only run approved plans
+- `Audit` — only record what happened
+
+If a bug appears in validation, you know exactly which file to look at.
+
+---
+
+## Part 3 — Create the Backend Project
+
+### 3.1 Open VS Code and Create the Folder Structure
+
+Open your terminal in VS Code with `` Ctrl+` ``.
+
+```bash
+mkdir elims-insight-assistant
+cd elims-insight-assistant
+mkdir -p backend/src
+mkdir seed-data
+```
+
+> `mkdir` = make directory. `-p` = create parent folders too if they don't exist.
+
+### 3.2 Create the .NET Solution
+
+A **solution** (.sln file) is a container that groups related .NET projects together.
+Think of it like a folder that knows about multiple projects and how they relate.
+
+```bash
+cd backend/src
+dotnet new sln -n ElimsInsightAssistant
+```
+
+### 3.3 Create the API Project
+
+```bash
+dotnet new webapi -n ElimsInsightAssistant.Api --no-openapi
+cd ElimsInsightAssistant.Api
+```
+
+**What `dotnet new webapi` does:**
+Creates a new ASP.NET Core Web API project. ASP.NET Core is the framework for
+building HTTP APIs in .NET. It handles routing (which URL calls which function),
+serialisation (converting objects to JSON), and hosting (running a web server).
+
+**Why `--no-openapi`?**
+We will add Swagger ourselves to understand what it does.
+
+### 3.4 Add Swagger (API documentation and testing UI)
+
+**What is Swagger?**
+Swagger (also called OpenAPI) automatically generates a web page that documents
+every endpoint in your API and lets you test them without writing any code.
+It reads your C# code and builds the documentation from it.
+
+```bash
+dotnet add package Swashbuckle.AspNetCore
+```
+
+> `dotnet add package` downloads a NuGet package. NuGet is the package manager
+> for .NET — like npm but for C#.
+
+### 3.5 Create the Test Project
+
+```bash
+cd ..
+dotnet new xunit -n ElimsInsightAssistant.Tests
+cd ElimsInsightAssistant.Tests
+dotnet add reference ../ElimsInsightAssistant.Api/ElimsInsightAssistant.Api.csproj
+```
+
+**What is xUnit?**
+xUnit is a testing framework for .NET. A test framework gives you tools to write
+functions that verify your code works correctly. When you run `dotnet test`, every
+function marked `[Fact]` is executed and pass/fail is reported.
+
+**Why write tests?**
+In regulated industries, tests are not optional — they are proof that your code
+does what it claims. They also catch regressions (things that used to work but
+broke after a change).
+
+**What is `dotnet add reference`?**
+It tells the test project where the API project is, so tests can use its classes.
+
+### 3.6 Add Both Projects to the Solution
+
+```bash
+cd ..
+dotnet sln add ElimsInsightAssistant.Api/ElimsInsightAssistant.Api.csproj
+dotnet sln add ElimsInsightAssistant.Tests/ElimsInsightAssistant.Tests.csproj
+```
+
+---
+
+## Part 4 — Define Your Data Models
+
+**What is a model?**
+A model is a C# class (or record) that defines the shape of your data. Think of it
+as a template: "a Study always has a StudyId, StudyCode, Customer, LegalEntity,
+and PlannedCompletionDate".
+
+**Why define models first?**
+Models are the contract between all layers of your application. Once you define what
+a `StudyDto` looks like, your services, controllers, and tests all agree on the shape.
+
+Create `ElimsInsightAssistant.Api/Models/AssistantModels.cs`:
+
+```csharp
+namespace ElimsInsightAssistant.Api.Models;
+
+// The incoming request from the user
+public record NaturalLanguageQueryRequest(string Query, UserContext UserContext);
+
+// Who is making the request — used for authorisation and filtering
+public record UserContext(string UserId, List<string> Roles, List<string> LegalEntities);
+
+// A study from the Study Service
+public record StudyDto(
+    string StudyId,
+    string StudyCode,
+    string Customer,
+    string LegalEntity,
+    DateTime? PlannedCompletionDate  // nullable — some studies have no planned date
+);
+
+// A test plan (TestP) from CoreLabs
+public record TestPDto(
+    string TestpId,
+    string StudyId,
+    string Status,
+    DateTime? CompletedAt,           // nullable — pending TestPs have no completion time
+    string RunType,
+    string? Result
+);
+
+// One classified study result
+public record StudyCompletionResult
+{
+    public string StudyId { get; init; } = string.Empty;
+    public string StudyCode { get; init; } = string.Empty;
+    public string Customer { get; init; } = string.Empty;
+    public DateTime? PlannedCompletionDate { get; init; }
+    public DateTime? ActualCompletionDate { get; init; }
+    public string Classification { get; init; } = string.Empty;  // "On Time", "Delayed", "Indeterminate"
+    public string Reason { get; init; } = string.Empty;
+    public List<string> DataQualityFlags { get; init; } = [];
+}
+
+// Summary counts across all results
+public record QuerySummary(int OnTime = 0, int Delayed = 0, int Indeterminate = 0);
+
+// The full response returned to the caller
+public record AssistantQueryResponse
+{
+    public string PlanId { get; init; } = string.Empty;
+    public string TraceId { get; init; } = string.Empty;
+    public string Status { get; init; } = "Completed";
+    public string MarkdownPlan { get; init; } = string.Empty;
+    public ExecutionPlan JsonPlan { get; init; } = new();
+    public ValidationResult Validation { get; init; } = new();
+    public QuerySummary Summary { get; init; } = new();
+    public List<StudyCompletionResult> Results { get; init; } = [];
+    public string Message { get; init; } = string.Empty;
+}
+
+// The structured execution plan
+public record ExecutionPlan
+{
+    public string Version { get; init; } = "1.0";
+    public string Intent { get; init; } = string.Empty;
+    public DateTime AsOfTimestamp { get; init; } = DateTime.UtcNow;
+    public List<string> Entities { get; init; } = [];
+    public List<PlanOperation> Operations { get; init; } = [];
+    public PlanCorrelate Correlate { get; init; } = new();
+    public PlanTransform Transform { get; init; } = new();
+    public PlanClassificationRules Classify { get; init; } = new();
+    public PlanOutput Output { get; init; } = new();
+    public PlanLimits Limits { get; init; } = new(500, true);
+}
+
+public record PlanOperation(string Service, string Action, List<string> Select, List<PlanFilter> Filters);
+public record PlanFilter(string Field, string Op, string? Value);
+public record PlanCorrelate(string LeftEntity = "study", string RightEntity = "testp",
+    string LeftField = "studyId", string RightField = "studyId");
+public record PlanTransform(List<string>? GroupBy = null, List<PlanAggregate>? Aggregates = null)
+{
+    public List<string> GroupBy { get; init; } = GroupBy ?? ["studyId"];
+    public List<PlanAggregate> Aggregates { get; init; } = Aggregates ??
+        [new("completedAt", "max", "actualCompletionDate")];
+}
+public record PlanAggregate(string Field, string Fn, string As);
+public record PlanClassificationRules(
+    string OnTime = "actualCompletionDate <= plannedCompletionDate",
+    string Delayed = "actualCompletionDate > plannedCompletionDate",
+    string Indeterminate = "plannedCompletionDate is null OR actualCompletionDate is null");
+public record PlanOutput(List<string>? IncludeClassifications = null, List<string>? Columns = null)
+{
+    public List<string> IncludeClassifications { get; init; } =
+        IncludeClassifications ?? ["Delayed", "Indeterminate"];
+    public List<string> Columns { get; init; } = Columns ?? ["studyId", "studyCode", "customer",
+        "plannedCompletionDate", "actualCompletionDate", "classification", "reason", "dataQualityFlags"];
+}
+public record PlanLimits(int MaxRows, bool Pagination);
+
+// Validation result returned after checking a plan
+public record ValidationResult(string Status = "Passed",
+    List<ValidationCheck>? Checks = null, List<string>? Errors = null)
+{
+    public List<ValidationCheck> Checks { get; init; } = Checks ?? [];
+    public List<string> Errors { get; init; } = Errors ?? [];
+}
+public record ValidationCheck(string Name, string Status);
+
+// Audit record — everything about one query execution
+public record AuditRecord
+{
+    public string TraceId { get; init; } = string.Empty;
+    public string PlanId { get; init; } = string.Empty;
+    public string OriginalQuery { get; init; } = string.Empty;
+    public string UserId { get; init; } = string.Empty;
+    public string MarkdownPlan { get; init; } = string.Empty;
+    public ExecutionPlan JsonPlan { get; init; } = new();
+    public string ValidationStatus { get; init; } = "Passed";
+    public List<ValidationCheck> ValidationChecks { get; init; } = [];
+    public List<string> ServicesCalled { get; init; } = [];
+    public DateTime ExecutionStartedAt { get; init; }
+    public DateTime ExecutionCompletedAt { get; init; }
+    public QuerySummary ResultSummary { get; init; } = new();
+    public List<StudyCompletionResult> ResultSnapshot { get; init; } = [];
+}
+```
+
+**Key C# concept — `record` vs `class`:**
+A `record` is a special type designed for data. It is immutable by default (values
+cannot change after creation — `init` instead of `set`), has built-in equality
+comparison, and is more concise than a class. Perfect for models that represent data.
+
+**Key C# concept — `?` (nullable):**
+`DateTime?` means "a DateTime that can be null". Without `?`, the compiler forces
+you to always have a value. The `?` explicitly acknowledges that absence of data
+is a valid state — which is honest and prevents null-reference crashes.
+
+---
+
+## Part 5 — Create the Seed Data
+
+Seed data is fake but realistic data used for development and demos. Real data
+from a database is not available during development, so we create plausible records.
+
+Create `seed-data/studies.json`:
+```json
+[
+  {"studyId":"S1","studyCode":"ST-001","customer":"ABC Pharma","legalEntity":"EU","plannedCompletionDate":"2026-04-10"},
+  {"studyId":"S2","studyCode":"ST-002","customer":"XYZ Labs","legalEntity":"EU","plannedCompletionDate":"2026-04-15"},
+  {"studyId":"S3","studyCode":"ST-003","customer":"BioTest","legalEntity":"US","plannedCompletionDate":"2026-04-20"},
+  {"studyId":"S4","studyCode":"ST-004","customer":"Delta Bio","legalEntity":"EU","plannedCompletionDate":null}
+]
+```
+
+Create `seed-data/testps.json`:
+```json
+[
+  {"testpId":"T1","studyId":"S1","status":"Completed","completedAt":"2026-04-08T10:30:00Z","runType":"Production","result":"Pass"},
+  {"testpId":"T2","studyId":"S1","status":"Completed","completedAt":"2026-04-09T15:00:00Z","runType":"Production","result":"Pass"},
+  {"testpId":"T3","studyId":"S2","status":"Completed","completedAt":"2026-04-16T11:00:00Z","runType":"Production","result":"Pass"},
+  {"testpId":"T4","studyId":"S2","status":"Completed","completedAt":"2026-04-17T09:30:00Z","runType":"Production","result":"Pass"},
+  {"testpId":"T5","studyId":"S3","status":"Completed","completedAt":"2026-04-18T14:00:00Z","runType":"Production","result":"Pass"},
+  {"testpId":"T6","studyId":"S4","status":"Pending","completedAt":null,"runType":"Production","result":null}
+]
+```
+
+**What this data represents:**
+- ST-001 has two completed TestPs, latest on Apr 9 — before planned Apr 10 → **On Time**
+- ST-002 has two completed TestPs, latest on Apr 17 — after planned Apr 15 → **Delayed**
+- ST-003 completed Apr 18 — before planned Apr 20 → **On Time** (but filtered out as US entity)
+- ST-004 has no planned date and no completed TestPs → **Indeterminate**
+
+---
+
+## Part 6 — Build the Services Layer
+
+### 6.1 Demo Data Services (reading seed data)
+
+**Concept — Interface + Implementation:**
+An `interface` defines *what* a service does (its contract) without saying *how*.
+The `class` provides the actual implementation. This matters because:
+- Tests can swap in a fake implementation without hitting real files
+- The real implementation can be replaced later (e.g. real database) without
+  changing any other code
+
+Create `Services/DemoDataServices.cs`:
+
+```csharp
+using System.Text.Json;
+using ElimsInsightAssistant.Api.Models;
+
+namespace ElimsInsightAssistant.Api.Services;
+
+// The interface — what any study service must be able to do
+public interface IStudyServiceClient
+{
+    Task<List<StudyDto>> ListStudiesAsync();
+}
+
+// The interface — what any CoreLabs service must be able to do
+public interface ICoreLabsServiceClient
+{
+    Task<List<TestPDto>> ListTestPsAsync();
+}
+
+// The implementation — reads from a JSON file on disk
+public class DemoStudyServiceClient(IWebHostEnvironment env) : IStudyServiceClient
+{
+    public async Task<List<StudyDto>> ListStudiesAsync()
+    {
+        // Build path: go 3 levels up from Api folder to reach elims-insight-assistant/
+        var file = Path.Combine(env.ContentRootPath, "..", "..", "..", "seed-data", "studies.json");
+        var json = await File.ReadAllTextAsync(Path.GetFullPath(file));
+        return JsonSerializer.Deserialize<List<StudyDto>>(json,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? [];
+    }
+}
+
+public class DemoCoreLabsServiceClient(IWebHostEnvironment env) : ICoreLabsServiceClient
+{
+    public async Task<List<TestPDto>> ListTestPsAsync()
+    {
+        var file = Path.Combine(env.ContentRootPath, "..", "..", "..", "seed-data", "testps.json");
+        var json = await File.ReadAllTextAsync(Path.GetFullPath(file));
+        return JsonSerializer.Deserialize<List<TestPDto>>(json,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? [];
+    }
+}
+```
+
+**Concept — `async` / `await` / `Task`:**
+File reads and network calls take time. `async` methods don't block the server
+while waiting — they pause and let other requests proceed. `Task<T>` is the
+promise of a future value. `await` says "wait here until this finishes, but don't
+block everything else".
+
+**Concept — `IWebHostEnvironment`:**
+Injected by ASP.NET Core automatically. Gives you `ContentRootPath` — the folder
+where the API project lives on disk, so you can build paths relative to it.
+
+### 6.2 Classification Service
+
+This is the core business logic. Given one study and its actual completion date,
+decide whether it is On Time, Delayed, or Indeterminate.
+
+Add to `Services/DemoDataServices.cs`:
+
+```csharp
+public interface IClassificationService
+{
+    StudyCompletionResult Classify(StudyDto study, DateTime? actualCompletionDate);
+}
+
+public class StudyCompletionClassificationService : IClassificationService
+{
+    public StudyCompletionResult Classify(StudyDto study, DateTime? actualCompletionDate)
+    {
+        var flags = new List<string>();
+        var classification = "On Time";
+        var reason = "Actual completion date is on or before planned completion date.";
+
+        // Check for missing data first — if anything is missing, it is Indeterminate
+        if (study.PlannedCompletionDate is null)
+        {
+            classification = "Indeterminate";
+            flags.Add("missing_planned_completion_date");
+        }
+
+        if (actualCompletionDate is null)
+        {
+            classification = "Indeterminate";
+            flags.Add("no_completed_testps");
+        }
+
+        // Only compare dates if we have both
+        if (classification != "Indeterminate" && actualCompletionDate > study.PlannedCompletionDate)
+        {
+            classification = "Delayed";
+            var days = (actualCompletionDate!.Value.Date - study.PlannedCompletionDate!.Value.Date).Days;
+            reason = $"Actual completion date is {days} days after planned completion date.";
+        }
+        else if (classification == "Indeterminate")
+        {
+            reason = "Planned completion date or completed TestP timestamp is missing.";
+        }
+
+        return new StudyCompletionResult
+        {
+            StudyId = study.StudyId,
+            StudyCode = study.StudyCode,
+            Customer = study.Customer,
+            PlannedCompletionDate = study.PlannedCompletionDate,
+            ActualCompletionDate = actualCompletionDate,
+            Classification = classification,
+            Reason = reason,
+            DataQualityFlags = flags
+        };
+    }
+}
+```
+
+### 6.3 Plan Generator
+
+**Why a plan generator instead of direct execution?**
+This is the key architectural decision. A natural language query is ambiguous and
+unsafe to execute directly. By first converting it to a structured JSON plan, we
+create a checkpoint where a validator can inspect and reject it before anything runs.
+
+**Why is the interface `async`?**
+The plan generator makes an outbound HTTP call to OpenAI. Any I/O operation must
+be `async` so the server does not freeze while waiting. Even `MockPlanGenerator`
+uses `Task.FromResult(...)` to satisfy the interface — it wraps its synchronous
+result in a completed Task at zero cost.
+
+Create `Services/PlanGenerator.cs`:
+
+```csharp
+using System.Text.Json;
+using ElimsInsightAssistant.Api.Models;
+using OpenAI.Chat;
+
+namespace ElimsInsightAssistant.Api.Services;
+
+public interface IPlanGenerator
+{
+    Task<(string markdown, ExecutionPlan? plan, string? error)> GenerateAsync(string query);
+}
+
+// ─── Mock (no API key required — used for local dev and tests) ───────────────
+
+public class MockPlanGenerator : IPlanGenerator
+{
+    private static readonly string[] SupportedTerms =
+        ["not completed on time", "delayed studies", "completed late", "not on time", "indeterminate"];
+
+    public Task<(string markdown, ExecutionPlan? plan, string? error)> GenerateAsync(string query)
+    {
+        var q = query.ToLowerInvariant();
+        if (!SupportedTerms.Any(q.Contains))
+            return Task.FromResult((string.Empty, (ExecutionPlan?)null,
+                (string?)"This demo currently supports queries related to study completion timeliness."));
+
+        var markdown = """
+# Analysis Plan
+Intent: Find studies not completed on time.
+...
+## Execution mode
+Read-only, deterministic, approved service contracts only.
+""";
+
+        var plan = new ExecutionPlan
+        {
+            Intent = "find_studies_not_completed_on_time",
+            Entities = ["study", "testp"],
+            Operations =
+            [
+                new("study-service", "listStudies",
+                    ["studyId", "studyCode", "customer", "legalEntity", "plannedCompletionDate"], []),
+                new("corelabs-service", "listTestPs",
+                    ["testpId", "studyId", "status", "completedAt", "runType", "result"],
+                    [new("status", "=", "Completed")])
+            ]
+        };
+
+        return Task.FromResult((markdown, (ExecutionPlan?)plan, (string?)null));
+    }
+}
+
+// ─── OpenAI (real NL intent extraction) ──────────────────────────────────────
+
+public class OpenAiPlanGenerator : IPlanGenerator
+{
+    private readonly ChatClient _client;
+    private const string SystemPrompt = """
+You are a governed analytics plan generator for a LIMS.
+Given a natural language query, decide whether it is about study completion timeliness.
+
+ALLOWED SERVICES AND FIELDS:
+  study-service    → action: listStudies  → fields: studyId, studyCode, customer, legalEntity, plannedCompletionDate
+  corelabs-service → action: listTestPs  → fields: testpId, studyId, status, completedAt, runType, result
+
+If supported, respond with:
+{ "supported": true, "markdown": "...", "plan": { ...ExecutionPlan JSON... } }
+
+If not supported, respond with:
+{ "supported": false, "reason": "one sentence" }
+
+Return ONLY valid JSON. No markdown fences. No extra text.
+""";
+
+    public OpenAiPlanGenerator(IConfiguration config)
+    {
+        var apiKey = config["OpenAI:ApiKey"]
+            ?? throw new InvalidOperationException("OpenAI:ApiKey is not configured.");
+        _client = new ChatClient("gpt-4o-mini", apiKey);
+    }
+
+    public async Task<(string markdown, ExecutionPlan? plan, string? error)> GenerateAsync(string query)
+    {
+        try
+        {
+            var completion = await _client.CompleteChatAsync(
+                [new SystemChatMessage(SystemPrompt), new UserChatMessage(query)],
+                new ChatCompletionOptions { ResponseFormat = ChatResponseFormat.CreateJsonObjectFormat() });
+
+            var json = completion.Value.Content[0].Text;
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            if (!root.GetProperty("supported").GetBoolean())
+            {
+                var reason = root.TryGetProperty("reason", out var r) ? r.GetString() : "Unsupported query.";
+                return (string.Empty, null, reason);
+            }
+
+            var markdown = root.GetProperty("markdown").GetString() ?? string.Empty;
+            var plan = JsonSerializer.Deserialize<ExecutionPlan>(
+                root.GetProperty("plan").GetRawText(),
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            return plan is null
+                ? (string.Empty, null, "Failed to parse plan from AI response.")
+                : (markdown, plan, null);
+        }
+        catch (JsonException ex)
+        {
+            return (string.Empty, null, $"AI returned invalid JSON: {ex.Message}");
+        }
+        catch (Exception ex)
+        {
+            return (string.Empty, null, $"AI plan generation failed: {ex.Message}");
+        }
+    }
+}
+```
+
+**Concept — Tuple return `(string, ExecutionPlan?, string?)`:**
+Instead of throwing exceptions or creating a special result class, this method
+returns three values at once: the markdown text, the plan (or null), and an error
+message (or null). The caller checks which ones are populated.
+
+**Concept — `Task.FromResult(...)`:**
+When a method must be `async` (to satisfy an interface) but has no real I/O to do,
+`Task.FromResult(value)` wraps a value in an already-completed Task. It costs
+almost nothing and keeps the interface consistent.
+
+**Concept — `ChatResponseFormat.CreateJsonObjectFormat()`:**
+Tells OpenAI to guarantee the response is valid JSON. Without this, the model
+might wrap its answer in markdown code fences or add explanatory text, which
+would break `JsonDocument.Parse`. This is called "JSON mode".
+
+---
+
+## Part 7 — Build the Validation Layer
+
+**Why validate the plan?**
+The plan generator could theoretically produce anything. Validation is a second,
+independent check that enforces the allowlist — regardless of how the plan was
+created. This is defence in depth: two separate systems must both agree before
+execution proceeds.
+
+Create `Validation/PlanValidator.cs`:
+
+```csharp
+using ElimsInsightAssistant.Api.Models;
+
+namespace ElimsInsightAssistant.Api.Validation;
+
+public interface IPlanValidator
+{
+    ValidationResult Validate(ExecutionPlan plan);
+}
+
+public class PlanValidator : IPlanValidator
+{
+    // The allowlist — only these services, actions, and fields are permitted
+    private static readonly Dictionary<string, (HashSet<string> actions, HashSet<string> fields)> Allowlist = new()
+    {
+        ["study-service"] = (
+            ["listStudies"],
+            ["studyId", "studyCode", "customer", "legalEntity", "plannedCompletionDate"]
+        ),
+        ["corelabs-service"] = (
+            ["listTestPs"],
+            ["testpId", "studyId", "status", "completedAt", "runType", "result"]
+        )
+    };
+
+    private static readonly HashSet<string> AllowedOperators =
+        ["=", "!=", ">", ">=", "<", "<=", "in", "between", "is null", "is not null"];
+
+    private static readonly HashSet<string> AllowedAggs =
+        ["max", "min", "count", "sum", "avg"];
+
+    private static readonly string[] ForbiddenTokens =
+        ["select ", " from ", "drop ", "script", "connectionstring",
+         "update ", "delete ", "insert "];
+
+    public ValidationResult Validate(ExecutionPlan plan)
+    {
+        var checks = new List<ValidationCheck>();
+        var errors = new List<string>();
+
+        foreach (var op in plan.Operations)
+        {
+            if (!Allowlist.ContainsKey(op.Service))
+            {
+                errors.Add($"Unapproved service: {op.Service}");
+            }
+            else
+            {
+                var entry = Allowlist[op.Service];
+
+                if (!entry.actions.Contains(op.Action))
+                    errors.Add($"Unapproved action: {op.Service}.{op.Action}");
+
+                foreach (var field in op.Select.Where(f => !entry.fields.Contains(f)))
+                    errors.Add($"Unapproved field: {op.Service}.{field}");
+
+                foreach (var filter in op.Filters)
+                {
+                    if (!AllowedOperators.Contains(filter.Op.ToLowerInvariant()))
+                        errors.Add($"Unapproved operator: {filter.Op}");
+
+                    // Detect SQL/script injection attempts in filter values
+                    if (filter.Value is { Length: > 0 } v &&
+                        ForbiddenTokens.Any(t => v.ToLowerInvariant().Contains(t)))
+                        errors.Add("Potential code/SQL fragment detected");
+                }
+            }
+
+            // No write operations ever
+            if (op.Action.Contains("update", StringComparison.OrdinalIgnoreCase) ||
+                op.Action.Contains("delete", StringComparison.OrdinalIgnoreCase) ||
+                op.Action.Contains("write", StringComparison.OrdinalIgnoreCase))
+                errors.Add("Write/update/delete operation is forbidden");
+        }
+
+        foreach (var agg in plan.Transform.Aggregates)
+            if (!AllowedAggs.Contains(agg.Fn.ToLowerInvariant()))
+                errors.Add($"Unapproved aggregate function: {agg.Fn}");
+
+        if (plan.Limits is null || plan.Limits.MaxRows <= 0)
+            errors.Add("Missing maxRows");
+        else if (plan.Limits.MaxRows > 500)
+            errors.Add("maxRows greater than 500");
+
+        // Build a named check result for each category
+        checks.Add(new("Service allowlist",   errors.Any(e => e.Contains("service"))           ? "Failed" : "Passed"));
+        checks.Add(new("Field allowlist",     errors.Any(e => e.Contains("field"))             ? "Failed" : "Passed"));
+        checks.Add(new("Read-only execution", errors.Any(e => e.Contains("Write/update"))      ? "Failed" : "Passed"));
+        checks.Add(new("Aggregation allowlist",errors.Any(e => e.Contains("aggregate"))        ? "Failed" : "Passed"));
+        checks.Add(new("Result limit",        errors.Any(e => e.Contains("maxRows"))           ? "Failed" : "Passed"));
+
+        return new ValidationResult(errors.Count == 0 ? "Passed" : "Failed", checks, errors);
+    }
+}
+```
+
+**Concept — Allowlist vs Blocklist:**
+A blocklist tries to enumerate everything bad (SQL injection, XSS...). An allowlist
+does the opposite: only explicitly approved items pass. Allowlists are safer because
+they fail closed — anything not on the list is rejected by default.
+
+---
+
+## Part 8 — Build the Execution Engine
+
+The execution engine runs after validation passes. It is the only place data is
+actually fetched and processed.
+
+Create `Execution/ExecutionEngine.cs`:
+
+```csharp
+using ElimsInsightAssistant.Api.Models;
+using ElimsInsightAssistant.Api.Services;
+
+namespace ElimsInsightAssistant.Api.Execution;
+
+public interface IExecutionEngine
+{
+    Task<(QuerySummary summary, List<StudyCompletionResult> rows, List<string> servicesCalled)>
+        ExecuteAsync(ExecutionPlan plan, UserContext userContext);
+}
+
+public class ExecutionEngine(
+    IStudyServiceClient studyClient,
+    ICoreLabsServiceClient coreLabsClient,
+    IClassificationService classificationService) : IExecutionEngine
+{
+    public async Task<(QuerySummary, List<StudyCompletionResult>, List<string>)>
+        ExecuteAsync(ExecutionPlan plan, UserContext userContext)
+    {
+        // Step 1 — Authorisation check before touching any data
+        if (!userContext.Roles.Contains("StudyViewer") || !userContext.Roles.Contains("CoreLabsViewer"))
+            throw new UnauthorizedAccessException("User lacks required roles.");
+
+        // Step 2 — Fetch studies, filtered to the user's permitted legal entities
+        var studies = (await studyClient.ListStudiesAsync())
+            .Where(s => userContext.LegalEntities.Contains(s.LegalEntity))
+            .ToList();
+
+        // Step 3 — Fetch only completed TestPs with a timestamp
+        var completedTestPs = (await coreLabsClient.ListTestPsAsync())
+            .Where(t => t.Status == "Completed" && t.CompletedAt is not null)
+            .ToList();
+
+        // Step 4 — For each study, find the LATEST TestP completion timestamp
+        // (a study is only complete when ALL its TestPs are done — max = last one)
+        var completionByStudy = completedTestPs
+            .GroupBy(t => t.StudyId)
+            .ToDictionary(g => g.Key, g => g.Max(x => x.CompletedAt));
+
+        // Step 5 — Classify every study
+        var allResults = studies.Select(study =>
+        {
+            completionByStudy.TryGetValue(study.StudyId, out var actual);
+            return classificationService.Classify(study, actual);
+        }).ToList();
+
+        // Step 6 — Build summary counts
+        var summary = new QuerySummary(
+            allResults.Count(r => r.Classification == "On Time"),
+            allResults.Count(r => r.Classification == "Delayed"),
+            allResults.Count(r => r.Classification == "Indeterminate"));
+
+        // Step 7 — Apply output filter from the plan (e.g. only Delayed + Indeterminate)
+        var filtered = allResults
+            .Where(r => plan.Output.IncludeClassifications.Contains(r.Classification))
+            .Take(plan.Limits.MaxRows)
+            .ToList();
+
+        return (summary, filtered, ["study-service", "corelabs-service"]);
+    }
+}
+```
+
+**Concept — LINQ (Language Integrated Query):**
+Methods like `.Where()`, `.GroupBy()`, `.ToDictionary()`, `.Select()`, `.Max()` are
+LINQ — a way to query collections in C# using a fluent, readable syntax.
+`.Where(x => condition)` filters. `.Select(x => transform)` transforms.
+`.GroupBy(x => key)` groups. It reads almost like English.
+
+---
+
+## Part 9 — Build the Audit Service
+
+Every query must be recorded — who asked, what plan was generated, whether it
+passed validation, what was returned. This is non-negotiable in regulated systems.
+
+Create `Audit/AuditService.cs`:
+
+```csharp
+using System.Collections.Concurrent;
+using ElimsInsightAssistant.Api.Models;
+
+namespace ElimsInsightAssistant.Api.Audit;
+
+public interface IAuditService
+{
+    void Save(AuditRecord record);
+    AuditRecord? Get(string traceId);
+}
+
+public class InMemoryAuditService : IAuditService
+{
+    // ConcurrentDictionary is thread-safe — multiple requests can write simultaneously
+    private readonly ConcurrentDictionary<string, AuditRecord> _records = new();
+
+    public void Save(AuditRecord record) => _records[record.TraceId] = record;
+
+    public AuditRecord? Get(string traceId) =>
+        _records.TryGetValue(traceId, out var r) ? r : null;
+}
+```
+
+**Concept — `ConcurrentDictionary`:**
+A web server handles many requests at the same time. A regular `Dictionary` is not
+safe for simultaneous writes — two requests writing at the same moment can corrupt
+it. `ConcurrentDictionary` is designed for this: it handles concurrency internally.
+
+**Why in-memory for a demo?**
+In-memory means data is lost when the server restarts. For production you would
+use a database. For a demo, in-memory is simpler and has no dependencies.
+
+---
+
+## Part 10 — Build the Controllers
+
+Controllers are the entry points — they sit at the HTTP boundary, receive requests,
+call services, and return responses. They should be thin: no business logic here.
+
+Create `Controllers/AssistantController.cs`:
+
+```csharp
+using ElimsInsightAssistant.Api.Audit;
+using ElimsInsightAssistant.Api.Execution;
+using ElimsInsightAssistant.Api.Models;
+using ElimsInsightAssistant.Api.Services;
+using ElimsInsightAssistant.Api.Validation;
+using Microsoft.AspNetCore.Mvc;
+
+namespace ElimsInsightAssistant.Api.Controllers;
+
+[ApiController]
+[Route("api/assistant")]
+public class AssistantController(
+    IPlanGenerator planGenerator,
+    IPlanValidator validator,
+    IExecutionEngine executionEngine,
+    IAuditService auditService) : ControllerBase
+{
+    // POST /api/assistant/query — the main endpoint
+    [HttpPost("query")]
+    public async Task<ActionResult<AssistantQueryResponse>> Query(
+        [FromBody] NaturalLanguageQueryRequest request)
+    {
+        // 1. Generate plan from natural language
+        var (markdown, plan, error) = planGenerator.Generate(request.Query);
+        if (plan is null)
+            return Ok(new AssistantQueryResponse
+                { Status = "UnsupportedQuery", Message = error ?? "Unsupported query" });
+
+        // 2. Validate the plan
+        var validation = validator.Validate(plan);
+        validation = validation with
+            { Checks = [.. validation.Checks, new("User authorization", "Passed")] };
+        if (validation.Status != "Passed")
+            return BadRequest(validation);
+
+        // 3. Execute and record timing
+        var traceId = $"TRACE-{Guid.NewGuid():N}";
+        var planId  = $"PLAN-{Guid.NewGuid():N}";
+        var started = DateTime.UtcNow;
+        var (summary, rows, servicesCalled) =
+            await executionEngine.ExecuteAsync(plan, request.UserContext);
+        var finished = DateTime.UtcNow;
+
+        var response = new AssistantQueryResponse
+        {
+            PlanId = planId, TraceId = traceId,
+            MarkdownPlan = markdown, JsonPlan = plan,
+            Validation = validation, Summary = summary, Results = rows
+        };
+
+        // 4. Save audit record
+        auditService.Save(new AuditRecord
+        {
+            TraceId = traceId, PlanId = planId,
+            OriginalQuery = request.Query, UserId = request.UserContext.UserId,
+            MarkdownPlan = markdown, JsonPlan = plan,
+            ValidationStatus = validation.Status, ValidationChecks = validation.Checks,
+            ServicesCalled = servicesCalled,
+            ExecutionStartedAt = started, ExecutionCompletedAt = finished,
+            ResultSummary = summary, ResultSnapshot = rows
+        });
+
+        return Ok(response);
+    }
+
+    // POST /api/assistant/plan — generate plan only, do not execute
+    [HttpPost("plan")]
+    public ActionResult<object> Plan([FromBody] NaturalLanguageQueryRequest request)
+    {
+        var (markdown, plan, error) = planGenerator.Generate(request.Query);
+        if (plan is null) return Ok(new { status = "UnsupportedQuery", message = error });
+        return Ok(new { markdownPlan = markdown, jsonPlan = plan });
+    }
+
+    // POST /api/assistant/plan/validate — validate a plan without executing it
+    [HttpPost("plan/validate")]
+    public ActionResult<ValidationResult> Validate([FromBody] ExecutionPlan plan) =>
+        Ok(validator.Validate(plan));
+
+    // POST /api/assistant/execute — execute a pre-built plan
+    [HttpPost("execute")]
+    public async Task<ActionResult<object>> Execute([FromBody] ExecuteRequest request)
+    {
+        var validation = validator.Validate(request.Plan);
+        if (validation.Status != "Passed") return BadRequest(validation);
+        var (summary, rows, _) = await executionEngine.ExecuteAsync(request.Plan, request.UserContext);
+        return Ok(new { summary, results = rows, validation });
+    }
+
+    // GET /api/assistant/audit/{traceId} — look up a past query by trace ID
+    [HttpGet("audit/{traceId}")]
+    public ActionResult<AuditRecord> Audit(string traceId)
+    {
+        var record = auditService.Get(traceId);
+        return record is null ? NotFound() : Ok(record);
+    }
+}
+
+public record ExecuteRequest(ExecutionPlan Plan, UserContext UserContext);
+```
+
+Create `Controllers/StudyDemoController.cs`:
+```csharp
+using ElimsInsightAssistant.Api.Models;
+using ElimsInsightAssistant.Api.Services;
+using Microsoft.AspNetCore.Mvc;
+
+namespace ElimsInsightAssistant.Api.Controllers;
+
+[ApiController]
+[Route("api/demo/studies")]
+public class StudyDemoController(IStudyServiceClient studyService) : ControllerBase
+{
+    [HttpGet]
+    public async Task<ActionResult<List<StudyDto>>> Get() =>
+        Ok(await studyService.ListStudiesAsync());
+}
+```
+
+Create `Controllers/CoreLabsDemoController.cs`:
+```csharp
+using ElimsInsightAssistant.Api.Models;
+using ElimsInsightAssistant.Api.Services;
+using Microsoft.AspNetCore.Mvc;
+
+namespace ElimsInsightAssistant.Api.Controllers;
+
+[ApiController]
+[Route("api/demo/corelabs/testps")]
+public class CoreLabsDemoController(ICoreLabsServiceClient coreLabsService) : ControllerBase
+{
+    [HttpGet]
+    public async Task<ActionResult<List<TestPDto>>> Get() =>
+        Ok(await coreLabsService.ListTestPsAsync());
+}
+```
+
+**Concept — Dependency Injection (DI):**
+Notice the controller receives `IPlanGenerator`, `IPlanValidator`, etc. in its
+constructor — it does not create them itself. This is Dependency Injection.
+ASP.NET Core's DI container creates and wires up all these objects automatically.
+
+Benefits:
+- Easy to test — swap real services for fakes in tests
+- Loose coupling — the controller doesn't care which implementation it gets
+- Single place to configure everything — `Program.cs`
+
+**Concept — `[ApiController]`, `[Route]`, `[HttpPost]`:**
+These are **attributes** — metadata you attach to classes and methods.
+`[ApiController]` enables automatic model validation and request binding.
+`[Route("api/assistant")]` sets the URL prefix for all methods in this controller.
+`[HttpPost("query")]` means this method handles POST requests to `/api/assistant/query`.
+
+---
+
+## Part 11 — Wire Everything Together in Program.cs
+
+`Program.cs` is the startup file. It registers all services with the DI container
+and configures the HTTP pipeline.
+
+```csharp
+using ElimsInsightAssistant.Api.Audit;
+using ElimsInsightAssistant.Api.Execution;
+using ElimsInsightAssistant.Api.Services;
+using ElimsInsightAssistant.Api.Validation;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Register services with the DI container
+// AddSingleton — one instance shared by all requests (stateless services)
+// AddScoped    — one instance per HTTP request (stateful per-request services)
+builder.Services.AddControllers();
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+// Use OpenAI when an API key is present; fall back to rule-based mock for local dev
+var openAiKey = builder.Configuration["OpenAI:ApiKey"];
+if (!string.IsNullOrWhiteSpace(openAiKey))
+    builder.Services.AddSingleton<IPlanGenerator, OpenAiPlanGenerator>();
+else
+    builder.Services.AddSingleton<IPlanGenerator, MockPlanGenerator>();
+
+builder.Services.AddSingleton<IPlanValidator,     PlanValidator>();
+builder.Services.AddSingleton<IAuditService,      InMemoryAuditService>();
+builder.Services.AddScoped<IStudyServiceClient,   DemoStudyServiceClient>();
+builder.Services.AddScoped<ICoreLabsServiceClient,DemoCoreLabsServiceClient>();
+builder.Services.AddScoped<IClassificationService,StudyCompletionClassificationService>();
+builder.Services.AddScoped<IExecutionEngine,      ExecutionEngine>();
+
+var app = builder.Build();
+
+// Configure the HTTP pipeline
+app.UseSwagger();
+app.UseSwaggerUI();
+app.MapControllers();
+app.Run();
+```
+
+**Concept — `AddSingleton` vs `AddScoped`:**
+
+| Lifetime | Created | Destroyed | Use when |
+|---|---|---|---|
+| `Singleton` | Once at startup | App shuts down | Stateless — same instance is safe for all requests |
+| `Scoped` | Each HTTP request | Request ends | Has per-request state (like reading a file) |
+| `Transient` | Every time it's requested | After each use | Lightweight, no shared state |
+
+`InMemoryAuditService` uses `ConcurrentDictionary` so it's safe as a singleton.
+`DemoStudyServiceClient` takes `IWebHostEnvironment` which is scoped, so it must be scoped too.
+
+---
+
+## Part 12 — Write the Tests
+
+Tests prove your code works. Write one test per behaviour, not per function.
+
+Create `ElimsInsightAssistant.Tests/GlobalUsings.cs`:
+```csharp
+global using Xunit;
+```
+
+Create `ElimsInsightAssistant.Tests/ClassificationTests.cs`:
+```csharp
+using ElimsInsightAssistant.Api.Models;
+using ElimsInsightAssistant.Api.Services;
+
+namespace ElimsInsightAssistant.Tests;
+
+public class ClassificationTests
+{
+    private readonly StudyCompletionClassificationService _svc = new();
+
+    [Fact]
+    public void OnTime_WhenActualBeforePlanned()
+    {
+        var result = _svc.Classify(
+            new StudyDto("S1","ST-001","C","EU", new DateTime(2026,4,10)),
+            new DateTime(2026,4,9));
+        Assert.Equal("On Time", result.Classification);
+    }
+
+    [Fact]
+    public void OnTime_WhenEqual() =>
+        Assert.Equal("On Time",
+            _svc.Classify(new("S1","ST","C","EU", new DateTime(2026,4,10)),
+                new DateTime(2026,4,10)).Classification);
+
+    [Fact]
+    public void Delayed_WhenAfter() =>
+        Assert.Equal("Delayed",
+            _svc.Classify(new("S1","ST","C","EU", new DateTime(2026,4,10)),
+                new DateTime(2026,4,12)).Classification);
+
+    [Fact]
+    public void Indeterminate_WhenPlannedMissing() =>
+        Assert.Equal("Indeterminate",
+            _svc.Classify(new("S1","ST","C","EU", null),
+                new DateTime(2026,4,12)).Classification);
+
+    [Fact]
+    public void Indeterminate_WhenActualMissing() =>
+        Assert.Equal("Indeterminate",
+            _svc.Classify(new("S1","ST","C","EU", new DateTime(2026,4,10)),
+                null).Classification);
+
+    [Fact]
+    public void UsesMaxTimestampAcrossCompletedTestPs()
+    {
+        // Simulate: LINQ caller finds max date before passing to Classify
+        var testps = new[] { new DateTime(2026,4,16), new DateTime(2026,4,17), new DateTime(2026,4,15) };
+        var actual = testps.Max();
+        var result = _svc.Classify(new("S2","ST-002","C","EU", new DateTime(2026,4,15)), actual);
+        Assert.Equal(new DateTime(2026,4,17), result.ActualCompletionDate);
+    }
+}
+```
+
+Create `ElimsInsightAssistant.Tests/ValidatorTests.cs`:
+```csharp
+using ElimsInsightAssistant.Api.Models;
+using ElimsInsightAssistant.Api.Validation;
+
+namespace ElimsInsightAssistant.Tests;
+
+public class ValidatorTests
+{
+    private readonly PlanValidator _validator = new();
+
+    // A known-good plan used as the base for all tests
+    private static ExecutionPlan ApprovedPlan => new()
+    {
+        Intent = "find_studies_not_completed_on_time",
+        Operations =
+        [
+            new("study-service", "listStudies",
+                ["studyId","studyCode","customer","legalEntity","plannedCompletionDate"], []),
+            new("corelabs-service", "listTestPs",
+                ["testpId","studyId","status","completedAt","runType","result"],
+                [new("status","=","Completed")])
+        ],
+        Limits = new PlanLimits(500, true)
+    };
+
+    [Fact] public void AcceptsApprovedPlan() =>
+        Assert.Equal("Passed", _validator.Validate(ApprovedPlan).Status);
+
+    [Fact]
+    public void RejectsUnapprovedService()
+    {
+        var plan = ApprovedPlan with
+            { Operations = [new("evil-service","listStudies",["studyId"],[])] };
+        Assert.Equal("Failed", _validator.Validate(plan).Status);
+    }
+
+    [Fact]
+    public void RejectsUnapprovedField()
+    {
+        var plan = ApprovedPlan with
+            { Operations = [new("study-service","listStudies",["studyId","secretField"],[])] };
+        Assert.Equal("Failed", _validator.Validate(plan).Status);
+    }
+
+    [Fact]
+    public void RejectsWriteOperation()
+    {
+        var plan = ApprovedPlan with
+            { Operations = [new("study-service","deleteStudies",["studyId"],[])] };
+        Assert.Equal("Failed", _validator.Validate(plan).Status);
+    }
+
+    [Fact]
+    public void RejectsMissingMaxRows()
+    {
+        var plan = ApprovedPlan with { Limits = new PlanLimits(0, true) };
+        Assert.Equal("Failed", _validator.Validate(plan).Status);
+    }
+
+    [Fact]
+    public void RejectsMaxRowsOver500()
+    {
+        var plan = ApprovedPlan with { Limits = new PlanLimits(501, true) };
+        Assert.Equal("Failed", _validator.Validate(plan).Status);
+    }
+}
+```
+
+**Concept — `with` expression:**
+`ApprovedPlan with { Operations = [...] }` creates a copy of the record with only
+the specified properties changed. Everything else stays the same. This is perfect
+for tests: start with a known-good object and make exactly one change per test.
+
+---
+
+## Part 13 — Build the Angular Frontend
+
+### 13.1 Create the Angular app
+
+In a new terminal, navigate to the `frontend` folder and run:
+
+```bash
+ng new elims-insight-assistant-ui --routing=false --style=scss --standalone=false
+cd elims-insight-assistant-ui
+```
+
+**What `ng new` creates:**
+- `src/app/` — your application components
+- `angular.json` — build configuration
+- `package.json` — npm dependencies
+- `tsconfig.json` — TypeScript compiler settings
+
+### 13.2 Create the Feature Module
+
+```bash
+ng generate module features/insight-assistant
+ng generate component features/insight-assistant
+ng generate service features/insight-assistant/services/insight-assistant-api
+```
+
+### 13.3 Create the Models
+
+Create `src/app/features/insight-assistant/models/assistant-query-request.model.ts`:
+```typescript
+export interface UserContext {
+  userId: string;
+  roles: string[];
+  legalEntities: string[];
+}
+
+export interface AssistantQueryRequest {
+  query: string;
+  userContext: UserContext;
+}
+```
+
+Create `src/app/features/insight-assistant/models/study-completion-result.model.ts`:
+```typescript
+export interface StudyCompletionResult {
+  studyId: string;
+  studyCode: string;
+  customer: string;
+  plannedCompletionDate: string | null;
+  actualCompletionDate: string | null;
+  classification: 'On Time' | 'Delayed' | 'Indeterminate';
+  reason: string;
+  dataQualityFlags: string[];
+}
+```
+
+### 13.4 Create the API Service
+
+`src/app/features/insight-assistant/services/insight-assistant-api.service.ts`:
+```typescript
+import { Injectable } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+
+@Injectable({ providedIn: 'root' })
+export class InsightAssistantApiService {
+  constructor(private http: HttpClient) {}
+
+  query(query: string) {
+    return this.http.post('/api/assistant/query', {
+      query,
+      userContext: {
+        userId: 'demo-user',
+        roles: ['StudyViewer', 'CoreLabsViewer'],
+        legalEntities: ['EU', 'US']
+      }
+    });
+  }
+}
+```
+
+**Concept — Angular Services and `HttpClient`:**
+A service is a class that holds logic shared across components. `HttpClient` makes
+HTTP calls to the backend. `@Injectable({ providedIn: 'root' })` registers it with
+Angular's DI container as a singleton — available everywhere in the app.
+
+### 13.5 Create the Component
+
+`src/app/features/insight-assistant/insight-assistant.component.ts`:
+```typescript
+import { Component } from '@angular/core';
+import { FormBuilder } from '@angular/forms';
+import { InsightAssistantApiService } from './services/insight-assistant-api.service';
+
+@Component({
+  selector: 'app-insight-assistant',
+  templateUrl: './insight-assistant.component.html',
+  styleUrls: ['./insight-assistant.component.scss']
+})
+export class InsightAssistantComponent {
+  examples = [
+    'Find studies not completed on time',
+    'Show delayed studies',
+    'Show indeterminate studies'
+  ];
+  response: any;
+  form = this.fb.group({ query: ['Find studies not completed on time'] });
+
+  constructor(private fb: FormBuilder, private api: InsightAssistantApiService) {}
+
+  runQuery(): void {
+    this.api.query(this.form.value.query || '').subscribe(r => this.response = r);
+  }
+
+  setQuery(q: string): void { this.form.patchValue({ query: q }); }
+}
+```
+
+`src/app/features/insight-assistant/insight-assistant.component.html`:
+```html
+<h1>eLIMS Insight Assistant</h1>
+<h3>Governed Natural-Language Analytics</h3>
+
+<div>
+  <label>Ask eLIMS</label>
+  <input [formControl]="form.controls.query" />
+  <button (click)="runQuery()">Run Query</button>
+</div>
+
+<div>
+  <button *ngFor="let ex of examples" (click)="setQuery(ex)">{{ ex }}</button>
+</div>
+
+<div *ngIf="response">
+  <h4>Summary</h4>
+  <p>
+    On Time: {{ response.summary?.onTime }} |
+    Delayed: {{ response.summary?.delayed }} |
+    Indeterminate: {{ response.summary?.indeterminate }}
+  </p>
+  <h4>Results</h4>
+  <pre>{{ response.results | json }}</pre>
+  <h4>Generated Plan</h4>
+  <pre>{{ response.markdownPlan }}</pre>
+</div>
+```
+
+**Concept — Angular Data Binding:**
+- `[formControl]="..."` — binds an input to a reactive form control (two-way)
+- `(click)="runQuery()"` — calls a method when the button is clicked
+- `{{ response.summary?.onTime }}` — displays a value; `?.` safely handles null
+- `*ngFor="let ex of examples"` — loops and creates one button per item
+- `*ngIf="response"` — only shows this section when response is not null
+- `| json` — pipe: transforms the value (pretty-prints an object as JSON)
+
+### 13.6 Add Proxy for Local Development
+
+When Angular runs on port 4200 and the API on port 5000, the browser blocks
+cross-origin requests. A proxy forwards Angular's API calls to the backend.
+
+Create `src/proxy.conf.json`:
+```json
+{
+  "/api": {
+    "target": "http://localhost:5000",
+    "secure": false
+  }
+}
+```
+
+In `angular.json` under `serve > options`, add:
+```json
+"proxyConfig": "src/proxy.conf.json"
+```
+
+### 13.7 Run the Frontend
+
+```bash
+ng serve
+```
+
+Open http://localhost:4200 in your browser.
+
+---
+
+## Part 14 — Configure OpenAI and Run Everything
+
+### Step 14.1 — Add Your OpenAI API Key (optional)
+
+Without a key the system runs in mock mode — that is fine for learning.
+To use real NL intent extraction, add your key using one of these methods:
+
+**Method A — User Secrets (recommended: key never touches a file)**
+```bash
+cd elims-insight-assistant/backend/src/ElimsInsightAssistant.Api
+dotnet user-secrets set "OpenAI:ApiKey" "sk-proj-..."
+```
+
+**Method B — Environment variable**
+```bash
+# Mac / Linux
+export OpenAI__ApiKey=sk-proj-...
+
+# Windows Command Prompt
+set OpenAI__ApiKey=sk-proj-...
+```
+
+> Note the double underscore `__` in the environment variable name —
+> that is how .NET maps nested config (`OpenAI:ApiKey`) to env vars.
+
+**How the app chooses which generator to use:**
+```
+OpenAI:ApiKey present in config?
+  YES → OpenAiPlanGenerator  (real NLP via gpt-4o-mini)
+  NO  → MockPlanGenerator    (keyword matching, no API key needed)
+```
+
+With `OpenAiPlanGenerator` active, queries like these all work even though
+they were never hardcoded:
+- *"Which studies missed their deadline?"*
+- *"Show me overdue trials"*
+- *"Find studies that finished after the planned date"*
+
+### Step 14.2 — Terminal 1: Backend API
+```bash
+cd elims-insight-assistant/backend/src/ElimsInsightAssistant.Api
+dotnet run --urls http://localhost:5000
+```
+
+### Step 14.3 — Terminal 2: Frontend
+```bash
+cd elims-insight-assistant/frontend/elims-insight-assistant-ui
+ng serve
+```
+
+### Step 14.4 — Terminal 3: Tests
+```bash
+cd elims-insight-assistant/backend/src/ElimsInsightAssistant.Tests
+dotnet test --verbosity normal
+```
+
+---
+
+## Part 15 — Key Concepts Summary
+
+| Concept | What It Means | Where Used |
+|---|---|---|
+| **Separation of Concerns** | Each class does one thing | Folder structure |
+| **Interface + Implementation** | Define contract separately from code | All services |
+| **Dependency Injection** | Framework wires up objects for you | Program.cs, constructors |
+| **Allowlist Validation** | Only approved items pass; everything else fails | PlanValidator |
+| **LINQ** | Query collections like a language | ExecutionEngine |
+| **async/await** | Don't block the server while waiting for I/O | Services, controllers |
+| **Records** | Immutable data containers | All models |
+| **Singleton vs Scoped** | Lifetime of objects in the DI container | Program.cs |
+| **ConcurrentDictionary** | Thread-safe dictionary for multi-request environments | AuditService |
+| **xUnit [Fact]** | Mark a method as a test | All test classes |
+| **Angular Component** | A reusable UI block with HTML + TypeScript | InsightAssistantComponent |
+| **Angular Service** | Shared logic injected into components | InsightAssistantApiService |
+| **Data Binding** | Connect UI to code automatically | Component HTML template |
+| **Proxy Config** | Forward Angular dev requests to the API | proxy.conf.json |
+| **OpenAI ChatClient** | Send a prompt, get a structured JSON response | OpenAiPlanGenerator |
+| **JSON Mode** | Force OpenAI to always return valid JSON | `CreateJsonObjectFormat()` |
+| **User Secrets** | Store API keys locally without committing them to git | OpenAI:ApiKey config |
+| **Feature Flag via Config** | Switch implementations at startup based on config | Program.cs key check |
+
+---
+
+## Common Mistakes and How to Avoid Them
+
+**"Could not find seed-data/studies.json"**
+The path in `DemoDataServices.cs` uses `..` to go up from `ContentRootPath`.
+Count carefully: from `.../ElimsInsightAssistant.Api`, three `..` reaches
+`elims-insight-assistant/` where `seed-data/` lives. Four `..` overshoots.
+
+**"Port 5000 is already in use"**
+Another process is using the port. In your terminal run:
+- Windows: `netstat -ano | findstr :5000` then `taskkill /PID <number> /F`
+- Mac/Linux: `lsof -i :5000` then `kill <PID>`
+
+**"UnauthorizedAccessException: User lacks required roles"**
+Your request body must include both `"StudyViewer"` and `"CoreLabsViewer"` in roles.
+
+**"No results returned"**
+Check `legalEntities` in your request. The EU seed data requires `"EU"` in the list.
+S3 (BioTest) is a US entity and will only appear if `"US"` is included.
+
+**Angular blank page**
+Ensure the proxy is configured and both the API and `ng serve` are running.
+Check the browser console (F12) for error messages.
+
+**"AI plan generation failed: ..."**
+The OpenAI API call failed. Check:
+1. Your API key is correct and has credits
+2. You are connected to the internet
+3. The key is set correctly — no extra spaces or quotes
+
+**"OpenAI:ApiKey is not configured" at startup**
+This only happens if `OpenAiPlanGenerator` is registered but the key is missing.
+The app normally falls back to `MockPlanGenerator` when the key is empty.
+Check `Program.cs` — the key check uses `string.IsNullOrWhiteSpace`.
+
+---
+
+*This document covers the complete implementation of eLIMS Insight Assistant.
+Every decision — from folder layout to OpenAI JSON mode — exists for a reason.
+Understanding the why makes the what memorable.*
