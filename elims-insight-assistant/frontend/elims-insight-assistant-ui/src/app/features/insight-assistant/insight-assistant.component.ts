@@ -1,12 +1,14 @@
 import { Component } from '@angular/core';
-import { FormBuilder, FormGroup } from '@angular/forms';
+import { FormBuilder, FormControl, FormGroup, ReactiveFormsModule } from '@angular/forms';
+import { NgFor, NgIf, JsonPipe } from '@angular/common';
 import { InsightAssistantApiService } from './services/insight-assistant-api.service';
 import { AssistantQueryResponse } from './models/assistant-query-response.model';
 
 @Component({
   selector: 'app-insight-assistant',
   templateUrl: './insight-assistant.component.html',
-  styleUrls: ['./insight-assistant.component.scss']
+  styleUrls: ['./insight-assistant.component.scss'],
+  imports: [ReactiveFormsModule, NgFor, NgIf, JsonPipe]
 })
 export class InsightAssistantComponent {
   examples = [
@@ -18,6 +20,8 @@ export class InsightAssistantComponent {
 
   response: AssistantQueryResponse | null = null;
   form: FormGroup;
+
+  get queryControl(): FormControl { return this.form.get('query') as FormControl; }
 
   constructor(private fb: FormBuilder, private api: InsightAssistantApiService) {
     // Form must be initialised inside the constructor so that fb is available.
