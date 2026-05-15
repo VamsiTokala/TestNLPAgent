@@ -1,6 +1,7 @@
 import { Component } from '@angular/core';
-import { FormBuilder } from '@angular/forms';
+import { FormBuilder, FormGroup } from '@angular/forms';
 import { InsightAssistantApiService } from './services/insight-assistant-api.service';
+import { AssistantQueryResponse } from './models/assistant-query-response.model';
 
 @Component({
   selector: 'app-insight-assistant',
@@ -14,13 +15,21 @@ export class InsightAssistantComponent {
     'Show indeterminate studies',
     'Show completed late studies'
   ];
-  response: any;
-  form = this.fb.group({ query: ['Find studies not completed on time'] });
 
-  constructor(private fb: FormBuilder, private api: InsightAssistantApiService) {}
+  response: AssistantQueryResponse | null = null;
+  form: FormGroup;
+
+  constructor(private fb: FormBuilder, private api: InsightAssistantApiService) {
+    // Form must be initialised inside the constructor so that fb is available.
+    // Class field initialisers run before constructor injection — using this.fb
+    // outside the constructor causes TS2729 in strict mode.
+    this.form = this.fb.group({ query: ['Find studies not completed on time'] });
+  }
 
   runQuery(): void {
-    this.api.query(this.form.value.query || '').subscribe(r => this.response = r);
+    this.api.query(this.form.value.query || '').subscribe(
+      (r: AssistantQueryResponse) => { this.response = r; }
+    );
   }
 
   setQuery(q: string): void { this.form.patchValue({ query: q }); }

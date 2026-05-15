@@ -10,7 +10,7 @@
 </div>
 <div *ngIf="response">
   <h4>Summary</h4>
-  <p>On Time: {{response.summary?.onTime}} | Delayed: {{response.summary?.delayed}} | Indeterminate: {{response.summary?.indeterminate}}</p>
+  <p>On Time: {{response.summary.onTime}} | Delayed: {{response.summary.delayed}} | Indeterminate: {{response.summary.indeterminate}}</p>
   <h4>Results</h4>
   <pre>{{ response.results | json }}</pre>
   <h4>Generated Plan</h4>
