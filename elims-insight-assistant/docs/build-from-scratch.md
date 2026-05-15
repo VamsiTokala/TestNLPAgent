@@ -1646,18 +1646,42 @@ Open http://localhost:4200 in your browser.
 
 ## Part 14 — Configure OpenAI and Run Everything
 
-### Step 14.1 — Add Your OpenAI API Key (optional)
+### Step 14.1 — Get an OpenAI API Key
 
-Without a key the system runs in mock mode — that is fine for learning.
-To use real NL intent extraction, add your key using one of these methods:
+> **Skip this step if you just want to run the demo in mock mode.**
+> Mock mode works without any account — jump straight to Step 14.2.
 
-**Method A — User Secrets (recommended: key never touches a file)**
+To enable real NL intent extraction (queries like "which studies missed their deadline?"):
+
+**1. Create an OpenAI account**
+Go to https://platform.openai.com and click **Sign up**.
+Use a Google/Microsoft account or create one with your email.
+
+**2. Add billing (required to use the API)**
+Go to https://platform.openai.com/settings/organization/billing
+Click **Add payment method** and add a card.
+You only pay for what you use. `gpt-4o-mini` costs roughly **$0.15 per 1 million input tokens**.
+A single query uses ~300 tokens — so $5 of credit lasts thousands of queries.
+
+**3. Create your API key**
+Go to https://platform.openai.com/api-keys
+Click **Create new secret key** → give it a name (e.g. "elims-dev") → click **Create**.
+Copy the key immediately — it starts with `sk-proj-...` and is only shown once.
+
+> **Never commit your API key to git.** Anyone with your key can use your billing account.
+> The methods below keep the key out of your code.
+
+**4. Add the key to the project — two options:**
+
+**Option A — User Secrets (recommended: key never touches any file)**
 ```bash
 cd elims-insight-assistant/backend/src/ElimsInsightAssistant.Api
 dotnet user-secrets set "OpenAI:ApiKey" "sk-proj-..."
 ```
+The key is stored in your OS user profile, not in the project folder.
+It is never included when you share or push the code.
 
-**Method B — Environment variable**
+**Option B — Environment variable**
 ```bash
 # Mac / Linux
 export OpenAI__ApiKey=sk-proj-...
@@ -1665,15 +1689,26 @@ export OpenAI__ApiKey=sk-proj-...
 # Windows Command Prompt
 set OpenAI__ApiKey=sk-proj-...
 ```
+> Note the double underscore `__` — that is how .NET maps nested config (`OpenAI:ApiKey`) to env vars.
 
-> Note the double underscore `__` in the environment variable name —
-> that is how .NET maps nested config (`OpenAI:ApiKey`) to env vars.
+**How the app tells you which mode is active:**
+Every time the API starts, it logs one line before anything else:
+```
+# With a key:
+info: Plan generator: OpenAiPlanGenerator (gpt-4o-mini, structured outputs)
+
+# Without a key:
+warn: Plan generator: MockPlanGenerator (keyword matching only — no real NLP).
+      To enable real NL intent extraction set OpenAI:ApiKey.
+      See docs/build-from-scratch.md §14.1 for how to obtain and configure a key.
+```
+If you see the `warn` line, you are in mock mode. The warning is intentional — there is no silent fallback.
 
 **How the app chooses which generator to use:**
 ```
-OpenAI:ApiKey present in config?
-  YES → OpenAiPlanGenerator  (real NLP via gpt-4o-mini)
-  NO  → MockPlanGenerator    (keyword matching, no API key needed)
+OpenAI:ApiKey present and non-empty?
+  YES → OpenAiPlanGenerator  (real NLP via gpt-4o-mini, strict JSON schema)
+  NO  → MockPlanGenerator    (keyword matching, no API call, no cost)
 ```
 
 With `OpenAiPlanGenerator` active, queries like these all work even though
