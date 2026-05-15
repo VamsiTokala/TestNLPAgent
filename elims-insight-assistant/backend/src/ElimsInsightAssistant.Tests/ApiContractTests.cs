@@ -9,18 +9,20 @@ public class ApiContractTests
     [Fact]
     public async Task MockGenerator_ReturnsPlan_ForSupportedQuery()
     {
-        var (markdown, plan, error) = await _generator.GenerateAsync("show me studies not completed on time");
-        Assert.NotNull(plan);
-        Assert.NotEmpty(markdown);
-        Assert.Null(error);
+        var result = await _generator.GenerateAsync("show me studies not completed on time");
+        Assert.NotNull(result.Plan);
+        Assert.NotEmpty(result.Markdown);
+        Assert.Null(result.Error);
+        Assert.False(result.IsServerError);
     }
 
     [Fact]
     public async Task MockGenerator_ReturnsUnsupported_ForUnknownQuery()
     {
-        var (_, plan, error) = await _generator.GenerateAsync("what is the weather today");
-        Assert.Null(plan);
-        Assert.NotNull(error);
+        var result = await _generator.GenerateAsync("what is the weather today");
+        Assert.Null(result.Plan);
+        Assert.NotNull(result.Error);
+        Assert.False(result.IsServerError); // unsupported ≠ server error
     }
 
     [Fact]
@@ -29,14 +31,27 @@ public class ApiContractTests
         string[] phrases = ["delayed studies", "completed late", "not on time", "indeterminate"];
         foreach (var phrase in phrases)
         {
-            var (_, plan, _) = await _generator.GenerateAsync(phrase);
-            Assert.NotNull(plan); // each phrase should resolve to a plan
+            var result = await _generator.GenerateAsync(phrase);
+            Assert.NotNull(result.Plan);
+            Assert.False(result.IsServerError);
         }
     }
 
     [Fact]
-    public void ValidateEndpoint_ShouldPassApprovedPlan() => Assert.True(true);
+    public void PlanGeneratorResult_IsServerError_DefaultsFalse()
+    {
+        // Verify the default value — IsServerError must be opt-in, not the default
+        var result = new PlanGeneratorResult("md", null, "unsupported");
+        Assert.False(result.IsServerError);
+    }
 
     [Fact]
-    public void AuditEndpoint_ShouldReturnAuditRecord() => Assert.True(true);
+    public void PlanGeneratorResult_IsServerError_CanBeSetTrue()
+    {
+        // Transient failures must explicitly set IsServerError so the controller returns 503
+        var result = new PlanGeneratorResult(string.Empty, null,
+            "Plan generation service is temporarily unavailable.", IsServerError: true);
+        Assert.True(result.IsServerError);
+        Assert.Null(result.Plan);
+    }
 }

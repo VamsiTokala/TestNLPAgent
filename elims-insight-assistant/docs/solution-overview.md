@@ -6,7 +6,7 @@
 User query
     ↓
 IPlanGenerator (async)
-    ├── OpenAiPlanGenerator  — when OpenAI:ApiKey is configured (gpt-4o-mini, JSON mode)
+    ├── OpenAiPlanGenerator  — when OpenAI:ApiKey is configured (gpt-4o-mini, strict JSON schema)
     └── MockPlanGenerator    — fallback for local dev / tests (keyword matching)
     ↓
 IPlanValidator
@@ -30,7 +30,7 @@ HTTP response (JSON)
 
 | Mode | Class | When Used | How It Works |
 |---|---|---|---|
-| **OpenAI** | `OpenAiPlanGenerator` | `OpenAI:ApiKey` is set | Sends query + system prompt to gpt-4o-mini, parses JSON response into `ExecutionPlan` |
+| **OpenAI** | `OpenAiPlanGenerator` | `OpenAI:ApiKey` is set | Sends query + system prompt to gpt-4o-mini with strict JSON schema; parses schema-constrained response into `ExecutionPlan` |
 | **Mock** | `MockPlanGenerator` | No API key (local dev, tests) | Lowercases query, checks hardcoded phrase list, returns fixed plan |
 
 Switching is automatic — `Program.cs` reads config at startup and registers the right implementation.
@@ -43,6 +43,18 @@ The plan generator only proposes a plan. Execution only happens after:
 3. Results are filtered to the user's permitted legal entities
 
 This means OpenAI's output — however creative — cannot bypass the safety net.
+
+## Error Handling Contract
+
+| Scenario | HTTP Status | Meaning |
+|---|---|---|
+| Query understood, not in scope | 200 `UnsupportedQuery` | Client should not retry — query is genuinely unsupported |
+| OpenAI down / network error | 503 `ServiceUnavailable` | Client should retry — transient failure |
+| Plan fails validation | 400 `BadRequest` | Plan produced by OpenAI failed the allowlist check |
+| User lacks roles | 500 (unhandled) | Authorization failed before execution |
+
+`PlanGeneratorResult.IsServerError` distinguishes the first two cases in code.
+Raw exception details are always logged server-side and never exposed to API consumers.
 
 ## Seed-Data Expected Output
 

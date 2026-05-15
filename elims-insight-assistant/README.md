@@ -74,6 +74,17 @@ Expected: ST-002 (Delayed, 2 days late) and ST-004 (Indeterminate, missing data)
 | GET | `/api/demo/studies` | View seed study data |
 | GET | `/api/demo/corelabs/testps` | View seed TestP data |
 
+## Error Handling
+
+| HTTP Status | Meaning | Client should... |
+|---|---|---|
+| 200 `status: Completed` | Success | Display results |
+| 200 `status: UnsupportedQuery` | Query out of scope | Show message to user, do not retry |
+| 400 | Plan failed allowlist validation | Fix the plan |
+| 503 `status: ServiceUnavailable` | OpenAI unavailable (network/outage) | Retry with backoff |
+
+Raw exception details are **never** in HTTP responses — they are logged server-side only.
+
 ## Project Structure
 
 ```

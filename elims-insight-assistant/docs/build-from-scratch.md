@@ -610,33 +610,59 @@ be `async` so the server does not freeze while waiting. Even `MockPlanGenerator`
 uses `Task.FromResult(...)` to satisfy the interface — it wraps its synchronous
 result in a completed Task at zero cost.
 
+**Why `PlanGeneratorResult` instead of a plain tuple?**
+A tuple `(markdown, plan, error)` cannot express *why* the plan is null. There are
+two completely different failure modes that need different HTTP responses:
+
+| Failure mode | Cause | Correct HTTP response |
+|---|---|---|
+| `UnsupportedQuery` | Model understood the query but it's out of scope | **200** — not an error; do not retry |
+| `ServiceUnavailable` | Network outage, provider error, parse failure | **503** — transient; client should retry |
+
+A `bool IsServerError` on `PlanGeneratorResult` lets the controller tell these apart.
+Without it, a provider outage silently looks like an unsupported query — monitoring
+can't detect the problem and clients won't retry.
+
 Create `Services/PlanGenerator.cs`:
 
 ```csharp
 using System.Text.Json;
 using ElimsInsightAssistant.Api.Models;
+using Microsoft.Extensions.Logging;
 using OpenAI.Chat;
 
 namespace ElimsInsightAssistant.Api.Services;
 
+// ─── Result type ──────────────────────────────────────────────────────────────
+// IsServerError = false → query understood but not supported → controller returns 200
+// IsServerError = true  → transient failure (network, provider, parse) → controller returns 503
+
+public record PlanGeneratorResult(
+    string Markdown,
+    ExecutionPlan? Plan,
+    string? Error,
+    bool IsServerError = false);  // default false — opt-in for transient errors
+
 public interface IPlanGenerator
 {
-    Task<(string markdown, ExecutionPlan? plan, string? error)> GenerateAsync(string query);
+    Task<PlanGeneratorResult> GenerateAsync(string query);
 }
 
-// ─── Mock (no API key required — used for local dev and tests) ───────────────
+// ─── Mock (no API key required — local dev and tests) ────────────────────────
 
 public class MockPlanGenerator : IPlanGenerator
 {
     private static readonly string[] SupportedTerms =
         ["not completed on time", "delayed studies", "completed late", "not on time", "indeterminate"];
 
-    public Task<(string markdown, ExecutionPlan? plan, string? error)> GenerateAsync(string query)
+    public Task<PlanGeneratorResult> GenerateAsync(string query)
     {
         var q = query.ToLowerInvariant();
         if (!SupportedTerms.Any(q.Contains))
-            return Task.FromResult((string.Empty, (ExecutionPlan?)null,
-                (string?)"This demo currently supports queries related to study completion timeliness."));
+            return Task.FromResult(new PlanGeneratorResult(
+                string.Empty, null,
+                "This demo currently supports queries related to study completion timeliness."));
+                // IsServerError defaults to false — this is a valid "not supported" response
 
         var markdown = """
 # Analysis Plan
@@ -660,92 +686,179 @@ Read-only, deterministic, approved service contracts only.
             ]
         };
 
-        return Task.FromResult((markdown, (ExecutionPlan?)plan, (string?)null));
+        return Task.FromResult(new PlanGeneratorResult(markdown, plan, null));
     }
 }
 
-// ─── OpenAI (real NL intent extraction) ──────────────────────────────────────
+// ─── OpenAI (real NL intent extraction with strict JSON schema output) ────────
 
 public class OpenAiPlanGenerator : IPlanGenerator
 {
     private readonly ChatClient _client;
+    private readonly ILogger<OpenAiPlanGenerator> _logger;
+
+    // JSON schema constrains the model's output to exactly the shape we need.
+    // Unlike JSON mode (which only guarantees valid JSON), strict schema means
+    // the provider rejects responses that don't match — no post-hoc surprises.
+    private static readonly BinaryData ResponseSchema = BinaryData.FromString("""
+    {
+      "type": "object",
+      "properties": {
+        "supported": { "type": "boolean" },
+        "reason":   { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "markdown": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "plan": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "version":    { "type": "string" },
+                "intent":     { "type": "string" },
+                "entities":   { "type": "array", "items": { "type": "string" } },
+                "operations": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "service": { "type": "string" },
+                      "action":  { "type": "string" },
+                      "select":  { "type": "array", "items": { "type": "string" } },
+                      "filters": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "field": { "type": "string" },
+                            "op":    { "type": "string" },
+                            "value": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+                          },
+                          "required": ["field", "op", "value"],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "required": ["service", "action", "select", "filters"],
+                    "additionalProperties": false
+                  }
+                },
+                "limits": {
+                  "type": "object",
+                  "properties": {
+                    "maxRows":    { "type": "integer" },
+                    "pagination": { "type": "boolean" }
+                  },
+                  "required": ["maxRows", "pagination"],
+                  "additionalProperties": false
+                }
+              },
+              "required": ["version", "intent", "entities", "operations", "limits"],
+              "additionalProperties": false
+            },
+            { "type": "null" }
+          ]
+        }
+      },
+      "required": ["supported", "reason", "markdown", "plan"],
+      "additionalProperties": false
+    }
+    """);
+
     private const string SystemPrompt = """
 You are a governed analytics plan generator for a LIMS.
-Given a natural language query, decide whether it is about study completion timeliness.
-
-ALLOWED SERVICES AND FIELDS:
-  study-service    → action: listStudies  → fields: studyId, studyCode, customer, legalEntity, plannedCompletionDate
-  corelabs-service → action: listTestPs  → fields: testpId, studyId, status, completedAt, runType, result
-
-If supported, respond with:
-{ "supported": true, "markdown": "...", "plan": { ...ExecutionPlan JSON... } }
-
-If not supported, respond with:
-{ "supported": false, "reason": "one sentence" }
-
-Return ONLY valid JSON. No markdown fences. No extra text.
+If the query is about study completion timeliness, set supported=true and populate markdown and plan.
+If not, set supported=false and explain in reason. Set markdown and plan to null.
 """;
 
-    public OpenAiPlanGenerator(IConfiguration config)
+    public OpenAiPlanGenerator(IConfiguration config, ILogger<OpenAiPlanGenerator> logger)
     {
+        _logger = logger;
         var apiKey = config["OpenAI:ApiKey"]
             ?? throw new InvalidOperationException("OpenAI:ApiKey is not configured.");
         _client = new ChatClient("gpt-4o-mini", apiKey);
     }
 
-    public async Task<(string markdown, ExecutionPlan? plan, string? error)> GenerateAsync(string query)
+    public async Task<PlanGeneratorResult> GenerateAsync(string query)
     {
         try
         {
             var completion = await _client.CompleteChatAsync(
                 [new SystemChatMessage(SystemPrompt), new UserChatMessage(query)],
-                new ChatCompletionOptions { ResponseFormat = ChatResponseFormat.CreateJsonObjectFormat() });
+                new ChatCompletionOptions
+                {
+                    ResponseFormat = ChatResponseFormat.CreateJsonSchemaFormat(
+                        "plan_response", ResponseSchema, jsonSchemaIsStrict: true)
+                });
 
             var json = completion.Value.Content[0].Text;
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
             if (!root.GetProperty("supported").GetBoolean())
-            {
-                var reason = root.TryGetProperty("reason", out var r) ? r.GetString() : "Unsupported query.";
-                return (string.Empty, null, reason);
-            }
+                return new PlanGeneratorResult(string.Empty, null,
+                    root.GetProperty("reason").GetString() ?? "Unsupported query.");
 
             var markdown = root.GetProperty("markdown").GetString() ?? string.Empty;
             var plan = JsonSerializer.Deserialize<ExecutionPlan>(
                 root.GetProperty("plan").GetRawText(),
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
-            return plan is null
-                ? (string.Empty, null, "Failed to parse plan from AI response.")
-                : (markdown, plan, null);
+            if (plan is null)
+            {
+                _logger.LogError("OpenAI returned supported=true but plan was null. Raw: {Json}", json);
+                return new PlanGeneratorResult(string.Empty, null,
+                    "Plan generation service returned an unexpected response.", IsServerError: true);
+            }
+
+            return new PlanGeneratorResult(markdown, plan, null);
         }
         catch (JsonException ex)
         {
-            return (string.Empty, null, $"AI returned invalid JSON: {ex.Message}");
+            // Strict schema makes this very unlikely — log full details for investigation
+            _logger.LogError(ex, "OpenAI response failed JSON parse for query: {Query}", query);
+            return new PlanGeneratorResult(string.Empty, null,
+                "Plan generation service returned an unreadable response.", IsServerError: true);
         }
         catch (Exception ex)
         {
-            return (string.Empty, null, $"AI plan generation failed: {ex.Message}");
+            // Network error, provider outage, auth failure — retryable
+            _logger.LogError(ex, "OpenAI call failed for query: {Query}", query);
+            return new PlanGeneratorResult(string.Empty, null,
+                "Plan generation service is temporarily unavailable.", IsServerError: true);
         }
     }
 }
 ```
 
-**Concept — Tuple return `(string, ExecutionPlan?, string?)`:**
-Instead of throwing exceptions or creating a special result class, this method
-returns three values at once: the markdown text, the plan (or null), and an error
-message (or null). The caller checks which ones are populated.
+**Concept — `PlanGeneratorResult` record vs tuple:**
+The old tuple `(markdown, plan, error)` couldn't say *why* the plan was null.
+The new record adds `IsServerError` — a named, typed flag. Named fields are
+harder to misuse than positional tuple elements and make intent obvious at the call site.
 
 **Concept — `Task.FromResult(...)`:**
-When a method must be `async` (to satisfy an interface) but has no real I/O to do,
-`Task.FromResult(value)` wraps a value in an already-completed Task. It costs
-almost nothing and keeps the interface consistent.
+When a method must be `async` to satisfy an interface but has no real I/O,
+`Task.FromResult(value)` wraps the value in an already-completed Task.
+It costs almost nothing and keeps the interface consistent.
 
-**Concept — `ChatResponseFormat.CreateJsonObjectFormat()`:**
-Tells OpenAI to guarantee the response is valid JSON. Without this, the model
-might wrap its answer in markdown code fences or add explanatory text, which
-would break `JsonDocument.Parse`. This is called "JSON mode".
+**Concept — Structured Outputs vs JSON Mode:**
+
+| | JSON Mode (`CreateJsonObjectFormat`) | Structured Outputs (`CreateJsonSchemaFormat`) |
+|---|---|---|
+| Guarantees | Valid JSON | Valid JSON *and* matches your schema |
+| Missing fields | Possible | Prevented by the provider |
+| Extra fields | Possible | Prevented (`additionalProperties: false`) |
+| Wrong types | Possible | Prevented |
+
+Structured outputs shift the enforcement to the provider level — before the
+response even leaves OpenAI. This means your parsing code handles the happy
+path only; the catch blocks are for genuine network/auth failures, not bad shapes.
+
+**Concept — Never log or return raw `ex.Message` to clients:**
+Exception messages often contain internal details: provider error codes, upstream
+server names, request IDs. Returning these to API consumers is an information
+disclosure risk and creates an unstable error contract (the message text is
+implementation detail, not an API guarantee). The pattern is:
+- `_logger.LogError(ex, ...)` — full exception recorded server-side for debugging
+- Return a fixed, generic string to the client — stable, safe, and intentional
 
 ---
 
@@ -1014,10 +1127,16 @@ public class AssistantController(
         [FromBody] NaturalLanguageQueryRequest request)
     {
         // 1. Generate plan from natural language
-        var (markdown, plan, error) = planGenerator.Generate(request.Query);
-        if (plan is null)
+        var result = await planGenerator.GenerateAsync(request.Query);
+
+        // Transient failure (network, provider outage) → 503 so clients know to retry
+        if (result.IsServerError)
+            return StatusCode(503, new { status = "ServiceUnavailable", message = result.Error });
+
+        // Genuinely unsupported query → 200 with status flag (not an error, just out of scope)
+        if (result.Plan is null)
             return Ok(new AssistantQueryResponse
-                { Status = "UnsupportedQuery", Message = error ?? "Unsupported query" });
+                { Status = "UnsupportedQuery", Message = result.Error ?? "Unsupported query" });
 
         // 2. Validate the plan
         var validation = validator.Validate(plan);
@@ -1601,8 +1720,10 @@ dotnet test --verbosity normal
 | **Angular Service** | Shared logic injected into components | InsightAssistantApiService |
 | **Data Binding** | Connect UI to code automatically | Component HTML template |
 | **Proxy Config** | Forward Angular dev requests to the API | proxy.conf.json |
-| **OpenAI ChatClient** | Send a prompt, get a structured JSON response | OpenAiPlanGenerator |
-| **JSON Mode** | Force OpenAI to always return valid JSON | `CreateJsonObjectFormat()` |
+| **OpenAI ChatClient** | Send a prompt, get a structured response | OpenAiPlanGenerator |
+| **Structured Outputs** | Schema-constrained JSON enforced by provider, not just prompted | `CreateJsonSchemaFormat` |
+| **`IsServerError` flag** | Distinguish retryable failures from unsupported queries | PlanGeneratorResult |
+| **Log server-side, generic to client** | Never return raw exception text to API consumers | OpenAiPlanGenerator catch blocks |
 | **User Secrets** | Store API keys locally without committing them to git | OpenAI:ApiKey config |
 | **Feature Flag via Config** | Switch implementations at startup based on config | Program.cs key check |
 
@@ -1631,11 +1752,15 @@ S3 (BioTest) is a US entity and will only appear if `"US"` is included.
 Ensure the proxy is configured and both the API and `ng serve` are running.
 Check the browser console (F12) for error messages.
 
-**"AI plan generation failed: ..."**
-The OpenAI API call failed. Check:
-1. Your API key is correct and has credits
-2. You are connected to the internet
-3. The key is set correctly — no extra spaces or quotes
+**API returns HTTP 503 "Plan generation service is temporarily unavailable"**
+This is a transient OpenAI failure (network, provider outage, invalid API key).
+Check: API key is correct → has credits → internet is reachable.
+This is intentional — 503 tells clients to retry, unlike 200 UnsupportedQuery which they should not retry.
+Full error details are in the server log (`dotnet run` terminal output), not in the HTTP response.
+
+**"AI plan generation failed" appears in server logs but not in the API response**
+This is by design — raw exception messages are never sent to clients (security + stable contracts).
+Look at the terminal where `dotnet run` is running to see the full exception.
 
 **"OpenAI:ApiKey is not configured" at startup**
 This only happens if `OpenAiPlanGenerator` is registered but the key is missing.

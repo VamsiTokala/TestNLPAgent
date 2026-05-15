@@ -9,52 +9,62 @@ namespace ElimsInsightAssistant.Api.Controllers;
 
 [ApiController]
 [Route("api/assistant")]
-public class AssistantController(IPlanGenerator planGenerator, IPlanValidator validator, IExecutionEngine executionEngine, IAuditService auditService) : ControllerBase
+public class AssistantController(
+    IPlanGenerator planGenerator,
+    IPlanValidator validator,
+    IExecutionEngine executionEngine,
+    IAuditService auditService) : ControllerBase
 {
     [HttpPost("query")]
     public async Task<ActionResult<AssistantQueryResponse>> Query([FromBody] NaturalLanguageQueryRequest request)
     {
-        var (markdown, plan, error) = await planGenerator.GenerateAsync(request.Query);
-        if (plan is null)
-            return Ok(new AssistantQueryResponse { Status = "UnsupportedQuery", Message = error ?? "Unsupported query" });
+        var result = await planGenerator.GenerateAsync(request.Query);
 
-        var validation = validator.Validate(plan);
+        // Transient server error (network, provider outage) → 503 so clients can retry
+        if (result.IsServerError)
+            return StatusCode(503, new { status = "ServiceUnavailable", message = result.Error });
+
+        // Genuinely unsupported query → 200 with status flag (not an error, just out of scope)
+        if (result.Plan is null)
+            return Ok(new AssistantQueryResponse { Status = "UnsupportedQuery", Message = result.Error ?? "Unsupported query" });
+
+        var validation = validator.Validate(result.Plan);
         validation = validation with { Checks = [.. validation.Checks, new("User authorization", "Passed")] };
         if (validation.Status != "Passed")
             return BadRequest(validation);
 
         var traceId = $"TRACE-{Guid.NewGuid():N}";
-        var planId = $"PLAN-{Guid.NewGuid():N}";
+        var planId  = $"PLAN-{Guid.NewGuid():N}";
         var started = DateTime.UtcNow;
-        var (summary, rows, servicesCalled) = await executionEngine.ExecuteAsync(plan, request.UserContext);
+        var (summary, rows, servicesCalled) = await executionEngine.ExecuteAsync(result.Plan, request.UserContext);
         var finished = DateTime.UtcNow;
 
         var response = new AssistantQueryResponse
         {
-            PlanId = planId,
-            TraceId = traceId,
-            MarkdownPlan = markdown,
-            JsonPlan = plan,
-            Validation = validation,
-            Summary = summary,
-            Results = rows
+            PlanId       = planId,
+            TraceId      = traceId,
+            MarkdownPlan = result.Markdown,
+            JsonPlan     = result.Plan,
+            Validation   = validation,
+            Summary      = summary,
+            Results      = rows
         };
 
         auditService.Save(new AuditRecord
         {
-            TraceId = traceId,
-            PlanId = planId,
-            OriginalQuery = request.Query,
-            UserId = request.UserContext.UserId,
-            MarkdownPlan = markdown,
-            JsonPlan = plan,
-            ValidationStatus = validation.Status,
-            ValidationChecks = validation.Checks,
-            ServicesCalled = servicesCalled,
-            ExecutionStartedAt = started,
+            TraceId             = traceId,
+            PlanId              = planId,
+            OriginalQuery       = request.Query,
+            UserId              = request.UserContext.UserId,
+            MarkdownPlan        = result.Markdown,
+            JsonPlan            = result.Plan,
+            ValidationStatus    = validation.Status,
+            ValidationChecks    = validation.Checks,
+            ServicesCalled      = servicesCalled,
+            ExecutionStartedAt  = started,
             ExecutionCompletedAt = finished,
-            ResultSummary = summary,
-            ResultSnapshot = rows
+            ResultSummary       = summary,
+            ResultSnapshot      = rows
         });
 
         return Ok(response);
@@ -63,13 +73,17 @@ public class AssistantController(IPlanGenerator planGenerator, IPlanValidator va
     [HttpPost("plan")]
     public async Task<ActionResult<object>> Plan([FromBody] NaturalLanguageQueryRequest request)
     {
-        var (markdown, plan, error) = await planGenerator.GenerateAsync(request.Query);
-        if (plan is null) return Ok(new { status = "UnsupportedQuery", message = error });
-        return Ok(new { markdownPlan = markdown, jsonPlan = plan });
+        var result = await planGenerator.GenerateAsync(request.Query);
+        if (result.IsServerError)
+            return StatusCode(503, new { status = "ServiceUnavailable", message = result.Error });
+        if (result.Plan is null)
+            return Ok(new { status = "UnsupportedQuery", message = result.Error });
+        return Ok(new { markdownPlan = result.Markdown, jsonPlan = result.Plan });
     }
 
     [HttpPost("plan/validate")]
-    public ActionResult<ValidationResult> Validate([FromBody] ExecutionPlan plan) => Ok(validator.Validate(plan));
+    public ActionResult<ValidationResult> Validate([FromBody] ExecutionPlan plan) =>
+        Ok(validator.Validate(plan));
 
     [HttpPost("execute")]
     public async Task<ActionResult<object>> Execute([FromBody] ExecuteRequest request)
