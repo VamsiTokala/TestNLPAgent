@@ -604,50 +604,44 @@ This is the key architectural decision. A natural language query is ambiguous an
 unsafe to execute directly. By first converting it to a structured JSON plan, we
 create a checkpoint where a validator can inspect and reject it before anything runs.
 
+**Why is the interface `async`?**
+The plan generator makes an outbound HTTP call to OpenAI. Any I/O operation must
+be `async` so the server does not freeze while waiting. Even `MockPlanGenerator`
+uses `Task.FromResult(...)` to satisfy the interface — it wraps its synchronous
+result in a completed Task at zero cost.
+
 Create `Services/PlanGenerator.cs`:
 
 ```csharp
+using System.Text.Json;
 using ElimsInsightAssistant.Api.Models;
+using OpenAI.Chat;
 
 namespace ElimsInsightAssistant.Api.Services;
 
 public interface IPlanGenerator
 {
-    (string markdown, ExecutionPlan? plan, string? error) Generate(string query);
+    Task<(string markdown, ExecutionPlan? plan, string? error)> GenerateAsync(string query);
 }
+
+// ─── Mock (no API key required — used for local dev and tests) ───────────────
 
 public class MockPlanGenerator : IPlanGenerator
 {
-    // Only these phrases trigger the demo plan
     private static readonly string[] SupportedTerms =
         ["not completed on time", "delayed studies", "completed late", "not on time", "indeterminate"];
 
-    public (string markdown, ExecutionPlan? plan, string? error) Generate(string query)
+    public Task<(string markdown, ExecutionPlan? plan, string? error)> GenerateAsync(string query)
     {
         var q = query.ToLowerInvariant();
-
-        // Reject anything we don't recognise — fail safe
         if (!SupportedTerms.Any(q.Contains))
-            return (string.Empty, null, "This demo currently supports queries related to study completion timeliness.");
+            return Task.FromResult((string.Empty, (ExecutionPlan?)null,
+                (string?)"This demo currently supports queries related to study completion timeliness."));
 
         var markdown = """
 # Analysis Plan
 Intent: Find studies not completed on time.
-
-## Contract mapping
-- Study Service: study identity, customer, legal entity, and planned completion date.
-- CoreLabs Service: TestP status and completion timestamps.
-
-## Steps
-1. Fetch studies from Study Service.
-2. Fetch completed TestPs from CoreLabs Service.
-3. Correlate Study and TestP records using studyId.
-4. Group TestPs by studyId.
-5. Derive actual study completion as the maximum TestP completedAt timestamp.
-6. Compare actual completion date with planned completion date.
-7. Classify each study as On Time, Delayed, or Indeterminate.
-8. Return Delayed and Indeterminate studies with supporting details.
-
+...
 ## Execution mode
 Read-only, deterministic, approved service contracts only.
 """;
@@ -666,7 +660,74 @@ Read-only, deterministic, approved service contracts only.
             ]
         };
 
-        return (markdown, plan, null);
+        return Task.FromResult((markdown, (ExecutionPlan?)plan, (string?)null));
+    }
+}
+
+// ─── OpenAI (real NL intent extraction) ──────────────────────────────────────
+
+public class OpenAiPlanGenerator : IPlanGenerator
+{
+    private readonly ChatClient _client;
+    private const string SystemPrompt = """
+You are a governed analytics plan generator for a LIMS.
+Given a natural language query, decide whether it is about study completion timeliness.
+
+ALLOWED SERVICES AND FIELDS:
+  study-service    → action: listStudies  → fields: studyId, studyCode, customer, legalEntity, plannedCompletionDate
+  corelabs-service → action: listTestPs  → fields: testpId, studyId, status, completedAt, runType, result
+
+If supported, respond with:
+{ "supported": true, "markdown": "...", "plan": { ...ExecutionPlan JSON... } }
+
+If not supported, respond with:
+{ "supported": false, "reason": "one sentence" }
+
+Return ONLY valid JSON. No markdown fences. No extra text.
+""";
+
+    public OpenAiPlanGenerator(IConfiguration config)
+    {
+        var apiKey = config["OpenAI:ApiKey"]
+            ?? throw new InvalidOperationException("OpenAI:ApiKey is not configured.");
+        _client = new ChatClient("gpt-4o-mini", apiKey);
+    }
+
+    public async Task<(string markdown, ExecutionPlan? plan, string? error)> GenerateAsync(string query)
+    {
+        try
+        {
+            var completion = await _client.CompleteChatAsync(
+                [new SystemChatMessage(SystemPrompt), new UserChatMessage(query)],
+                new ChatCompletionOptions { ResponseFormat = ChatResponseFormat.CreateJsonObjectFormat() });
+
+            var json = completion.Value.Content[0].Text;
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            if (!root.GetProperty("supported").GetBoolean())
+            {
+                var reason = root.TryGetProperty("reason", out var r) ? r.GetString() : "Unsupported query.";
+                return (string.Empty, null, reason);
+            }
+
+            var markdown = root.GetProperty("markdown").GetString() ?? string.Empty;
+            var plan = JsonSerializer.Deserialize<ExecutionPlan>(
+                root.GetProperty("plan").GetRawText(),
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            return plan is null
+                ? (string.Empty, null, "Failed to parse plan from AI response.")
+                : (markdown, plan, null);
+        }
+        catch (JsonException ex)
+        {
+            return (string.Empty, null, $"AI returned invalid JSON: {ex.Message}");
+        }
+        catch (Exception ex)
+        {
+            return (string.Empty, null, $"AI plan generation failed: {ex.Message}");
+        }
     }
 }
 ```
@@ -675,6 +736,16 @@ Read-only, deterministic, approved service contracts only.
 Instead of throwing exceptions or creating a special result class, this method
 returns three values at once: the markdown text, the plan (or null), and an error
 message (or null). The caller checks which ones are populated.
+
+**Concept — `Task.FromResult(...)`:**
+When a method must be `async` (to satisfy an interface) but has no real I/O to do,
+`Task.FromResult(value)` wraps a value in an already-completed Task. It costs
+almost nothing and keeps the interface consistent.
+
+**Concept — `ChatResponseFormat.CreateJsonObjectFormat()`:**
+Tells OpenAI to guarantee the response is valid JSON. Without this, the model
+might wrap its answer in markdown code fences or add explanatory text, which
+would break `JsonDocument.Parse`. This is called "JSON mode".
 
 ---
 
@@ -1094,7 +1165,13 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
-builder.Services.AddSingleton<IPlanGenerator,     MockPlanGenerator>();
+// Use OpenAI when an API key is present; fall back to rule-based mock for local dev
+var openAiKey = builder.Configuration["OpenAI:ApiKey"];
+if (!string.IsNullOrWhiteSpace(openAiKey))
+    builder.Services.AddSingleton<IPlanGenerator, OpenAiPlanGenerator>();
+else
+    builder.Services.AddSingleton<IPlanGenerator, MockPlanGenerator>();
+
 builder.Services.AddSingleton<IPlanValidator,     PlanValidator>();
 builder.Services.AddSingleton<IAuditService,      InMemoryAuditService>();
 builder.Services.AddScoped<IStudyServiceClient,   DemoStudyServiceClient>();
@@ -1448,21 +1525,57 @@ Open http://localhost:4200 in your browser.
 
 ---
 
-## Part 14 — Run Everything
+## Part 14 — Configure OpenAI and Run Everything
 
-### Terminal 1 — Backend API:
+### Step 14.1 — Add Your OpenAI API Key (optional)
+
+Without a key the system runs in mock mode — that is fine for learning.
+To use real NL intent extraction, add your key using one of these methods:
+
+**Method A — User Secrets (recommended: key never touches a file)**
+```bash
+cd elims-insight-assistant/backend/src/ElimsInsightAssistant.Api
+dotnet user-secrets set "OpenAI:ApiKey" "sk-proj-..."
+```
+
+**Method B — Environment variable**
+```bash
+# Mac / Linux
+export OpenAI__ApiKey=sk-proj-...
+
+# Windows Command Prompt
+set OpenAI__ApiKey=sk-proj-...
+```
+
+> Note the double underscore `__` in the environment variable name —
+> that is how .NET maps nested config (`OpenAI:ApiKey`) to env vars.
+
+**How the app chooses which generator to use:**
+```
+OpenAI:ApiKey present in config?
+  YES → OpenAiPlanGenerator  (real NLP via gpt-4o-mini)
+  NO  → MockPlanGenerator    (keyword matching, no API key needed)
+```
+
+With `OpenAiPlanGenerator` active, queries like these all work even though
+they were never hardcoded:
+- *"Which studies missed their deadline?"*
+- *"Show me overdue trials"*
+- *"Find studies that finished after the planned date"*
+
+### Step 14.2 — Terminal 1: Backend API
 ```bash
 cd elims-insight-assistant/backend/src/ElimsInsightAssistant.Api
 dotnet run --urls http://localhost:5000
 ```
 
-### Terminal 2 — Frontend:
+### Step 14.3 — Terminal 2: Frontend
 ```bash
 cd elims-insight-assistant/frontend/elims-insight-assistant-ui
 ng serve
 ```
 
-### Terminal 3 — Tests:
+### Step 14.4 — Terminal 3: Tests
 ```bash
 cd elims-insight-assistant/backend/src/ElimsInsightAssistant.Tests
 dotnet test --verbosity normal
@@ -1488,6 +1601,10 @@ dotnet test --verbosity normal
 | **Angular Service** | Shared logic injected into components | InsightAssistantApiService |
 | **Data Binding** | Connect UI to code automatically | Component HTML template |
 | **Proxy Config** | Forward Angular dev requests to the API | proxy.conf.json |
+| **OpenAI ChatClient** | Send a prompt, get a structured JSON response | OpenAiPlanGenerator |
+| **JSON Mode** | Force OpenAI to always return valid JSON | `CreateJsonObjectFormat()` |
+| **User Secrets** | Store API keys locally without committing them to git | OpenAI:ApiKey config |
+| **Feature Flag via Config** | Switch implementations at startup based on config | Program.cs key check |
 
 ---
 
@@ -1514,8 +1631,19 @@ S3 (BioTest) is a US entity and will only appear if `"US"` is included.
 Ensure the proxy is configured and both the API and `ng serve` are running.
 Check the browser console (F12) for error messages.
 
+**"AI plan generation failed: ..."**
+The OpenAI API call failed. Check:
+1. Your API key is correct and has credits
+2. You are connected to the internet
+3. The key is set correctly — no extra spaces or quotes
+
+**"OpenAI:ApiKey is not configured" at startup**
+This only happens if `OpenAiPlanGenerator` is registered but the key is missing.
+The app normally falls back to `MockPlanGenerator` when the key is empty.
+Check `Program.cs` — the key check uses `string.IsNullOrWhiteSpace`.
+
 ---
 
 *This document covers the complete implementation of eLIMS Insight Assistant.
-Every decision — from folder layout to `ConcurrentDictionary` — exists for a reason.
+Every decision — from folder layout to OpenAI JSON mode — exists for a reason.
 Understanding the why makes the what memorable.*
