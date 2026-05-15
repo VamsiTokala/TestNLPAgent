@@ -14,7 +14,7 @@ public class AssistantController(IPlanGenerator planGenerator, IPlanValidator va
     [HttpPost("query")]
     public async Task<ActionResult<AssistantQueryResponse>> Query([FromBody] NaturalLanguageQueryRequest request)
     {
-        var (markdown, plan, error) = planGenerator.Generate(request.Query);
+        var (markdown, plan, error) = await planGenerator.GenerateAsync(request.Query);
         if (plan is null)
             return Ok(new AssistantQueryResponse { Status = "UnsupportedQuery", Message = error ?? "Unsupported query" });
 
@@ -61,9 +61,9 @@ public class AssistantController(IPlanGenerator planGenerator, IPlanValidator va
     }
 
     [HttpPost("plan")]
-    public ActionResult<object> Plan([FromBody] NaturalLanguageQueryRequest request)
+    public async Task<ActionResult<object>> Plan([FromBody] NaturalLanguageQueryRequest request)
     {
-        var (markdown, plan, error) = planGenerator.Generate(request.Query);
+        var (markdown, plan, error) = await planGenerator.GenerateAsync(request.Query);
         if (plan is null) return Ok(new { status = "UnsupportedQuery", message = error });
         return Ok(new { markdownPlan = markdown, jsonPlan = plan });
     }
