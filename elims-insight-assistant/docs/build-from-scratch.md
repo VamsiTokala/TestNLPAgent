@@ -1463,44 +1463,98 @@ for tests: start with a known-good object and make exactly one change per test.
 
 ## Part 13 — Build the Angular Frontend
 
-> **Note:** Angular 21 (the version used here) defaults to **standalone components** —
-> there is no NgModule. Every component declares its own dependencies in an `imports`
-> array inside the `@Component` decorator. The full scaffold (all files below) already
-> exists in the repository. This section explains what each file does and why.
+> **Angular 21 uses standalone components by default** — there is no NgModule.
+> Each component declares its own dependencies in an `imports` array inside
+> `@Component`. This section shows you how to create the project from scratch
+> yourself, then walks through every file so you understand what it does and why.
 
-### 13.1 Project scaffold — what the files are
+### 13.1 Create the project with `ng new`
 
-The scaffold was created for you. The key files are:
+Open a terminal, navigate to the `frontend` folder, and run:
+
+```bash
+cd elims-insight-assistant/frontend
+ng new elims-insight-assistant-ui --routing=false --style=scss
+cd elims-insight-assistant-ui
+```
+
+**What each flag means:**
+- `--routing=false` — we don't need multiple pages/routes; skip the router module
+- `--style=scss` — use SCSS (CSS with variables and nesting) instead of plain CSS
+
+**What `ng new` creates for you:**
+```
+elims-insight-assistant-ui/
+├── angular.json        ← build + serve configuration
+├── package.json        ← npm dependencies (Angular, RxJS, zone.js, etc.)
+├── tsconfig.json       ← TypeScript compiler settings
+├── tsconfig.app.json   ← extends tsconfig.json, used when building the app
+├── src/
+│   ├── index.html      ← the one HTML page; Angular injects everything into it
+│   ├── main.ts         ← entry point; bootstraps the root component
+│   ├── styles.scss     ← global styles
+│   └── app/
+│       ├── app.component.ts    ← root component Angular generates by default
+│       ├── app.component.html  ← default "Hello world" template (we replace this)
+│       └── app.component.scss
+```
+
+> **If you cloned this repository:** all these files already exist — you do not
+> need to run `ng new`. Just run `npm install` inside
+> `frontend/elims-insight-assistant-ui/` and skip to §13.2.
+>
+> **If you are building your own project from scratch:** run the `ng new` command
+> above, then follow every step in this Part to replace and add the files.
+
+After `ng new`, delete the generated `app.component.html` and `app.component.spec.ts`
+— we will write the root component as a single TypeScript file with an inline template:
+
+```bash
+rm src/app/app.component.html
+rm src/app/app.component.spec.ts
+```
+
+Now create the feature folder structure:
+
+```bash
+mkdir -p src/app/features/insight-assistant/models
+mkdir -p src/app/features/insight-assistant/services
+```
+
+Your project structure should now look like this:
 
 ```
 frontend/elims-insight-assistant-ui/
-├── angular.json          ← build + serve config (uses @angular/build esbuild builder)
-├── package.json          ← npm dependencies
-├── tsconfig.json         ← TypeScript compiler settings (strict mode)
-├── tsconfig.app.json     ← extends tsconfig.json, targets src/main.ts
-├── proxy.conf.json       ← dev proxy: /api → http://localhost:5000
+├── angular.json
+├── package.json
+├── tsconfig.json
+├── tsconfig.app.json
+├── proxy.conf.json       ← you will create this in §13.8
 ├── src/
-│   ├── index.html        ← single HTML page, contains <app-root>
-│   ├── main.ts           ← entry point — bootstraps AppComponent
-│   ├── styles.scss       ← global CSS
+│   ├── index.html
+│   ├── main.ts
+│   ├── styles.scss
 │   └── app/
-│       ├── app.component.ts          ← root component, renders <app-insight-assistant>
+│       ├── app.component.ts          ← rewrite this (§13.3)
 │       └── features/insight-assistant/
-│           ├── insight-assistant.component.ts   ← main UI logic
-│           ├── insight-assistant.component.html ← template
-│           ├── insight-assistant.component.scss ← styles
-│           ├── models/                          ← TypeScript interfaces
+│           ├── insight-assistant.component.ts   ← create (§13.6)
+│           ├── insight-assistant.component.html ← create (§13.6)
+│           ├── insight-assistant.component.scss ← create (§13.6)
+│           ├── models/                          ← create files (§13.4)
 │           └── services/
-│               └── insight-assistant-api.service.ts
+│               └── insight-assistant-api.service.ts  ← create (§13.5)
 ```
 
 **Why no NgModule?**
-In Angular 17+, the framework made standalone the default. Instead of a
-central `AppModule` that lists every component, each component lists its own
-dependencies in `imports: [...]`. This removes a layer of indirection that
-confused beginners and led to "why isn't my component declared?" errors.
+In Angular 17+, standalone is the default. Instead of a central `AppModule` that
+lists every component, each component lists its own dependencies in `imports: [...]`.
+This removes a layer of indirection that caused the classic beginner error
+"Component X is not declared in any NgModule."
 
 ### 13.2 Entry point — `src/main.ts`
+
+`ng new` generates a `main.ts` that uses `bootstrapApplication`. Open it and make
+sure it matches:
 
 ```typescript
 import { bootstrapApplication } from '@angular/platform-browser';
@@ -1513,10 +1567,13 @@ bootstrapApplication(AppComponent, {
 ```
 
 **What this does:**
-- `bootstrapApplication` starts Angular with a standalone root component — no NgModule needed.
-- `provideHttpClient()` registers Angular's HTTP client so any component or service can inject it.
+- `bootstrapApplication` starts Angular with a standalone root component — no NgModule
+- `provideHttpClient()` registers Angular's HTTP service so any component or service
+  can inject it and make API calls
 
 ### 13.3 Root component — `src/app/app.component.ts`
+
+Replace the contents of `app.component.ts` with:
 
 ```typescript
 import { Component } from '@angular/core';
@@ -1532,9 +1589,10 @@ export class AppComponent {}
 
 **Key points:**
 - `imports: [InsightAssistantComponent]` — the standalone way to use another component.
-  In NgModule apps this was done in a module's `declarations` array; now each component
-  does it itself.
-- The template just renders the feature component as a full-page app.
+  In the old NgModule style this was done in `declarations: [...]` inside a module file.
+  Now each component brings in what it needs directly.
+- The inline `template` replaces the deleted `app.component.html`. For a root shell
+  component this is fine — there is only one line to render.
 
 ### 13.4 Create the Models
 
