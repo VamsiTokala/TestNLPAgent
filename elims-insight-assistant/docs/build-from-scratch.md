@@ -239,21 +239,60 @@ serialisation (converting objects to JSON), and hosting (running a web server).
 **Why `--no-openapi`?**
 We will add Swagger ourselves to understand what it does.
 
-### 3.4 Add Swagger (API documentation and testing UI)
+### 3.4 Add NuGet packages
 
-**What is Swagger?**
-Swagger (also called OpenAPI) automatically generates a web page that documents
-every endpoint in your API and lets you test them without writing any code.
-It reads your C# code and builds the documentation from it.
+**What is NuGet?**
+NuGet is the package manager for .NET — like npm for JavaScript. Running
+`dotnet add package` downloads the library and adds it to your `.csproj` file.
+
+**Swagger** — generates a web UI that documents and lets you test every API endpoint:
 
 ```bash
 dotnet add package Swashbuckle.AspNetCore
 ```
 
-> `dotnet add package` downloads a NuGet package. NuGet is the package manager
-> for .NET — like npm but for C#.
+**OpenAI SDK** — the official .NET client for calling OpenAI's chat API:
 
-### 3.5 Create the Test Project
+```bash
+dotnet add package OpenAI --version 2.10.0
+```
+
+> The version is pinned to `2.10.0` because the structured outputs API
+> (`CreateJsonSchemaFormat`) changed signature between minor versions.
+
+### 3.5 Add UserSecretsId to the project file
+
+User Secrets let you store API keys on your machine without ever putting them
+in a file that gets committed to git. The `.csproj` needs a `<UserSecretsId>`
+property to enable this feature.
+
+Open `ElimsInsightAssistant.Api.csproj` in VS Code and add the highlighted line:
+
+```xml
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>elims-insight-assistant-api</UserSecretsId>   ← ADD THIS
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="OpenAI" Version="2.10.0" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.9.0" />
+  </ItemGroup>
+</Project>
+```
+
+The value can be any unique string — the project name works fine. Without this,
+`dotnet user-secrets set` fails with:
+```
+Could not find the global property 'UserSecretsId' in MSBuild project
+```
+
+**Your final `.csproj` should look exactly like the block above** — two package
+references and the `UserSecretsId` property. Verify it matches before continuing.
+
+### 3.7 Create the Test Project
 
 ```bash
 cd ..
@@ -275,7 +314,7 @@ broke after a change).
 **What is `dotnet add reference`?**
 It tells the test project where the API project is, so tests can use its classes.
 
-### 3.6 Add Both Projects to the Solution
+### 3.8 Add Both Projects to the Solution
 
 ```bash
 cd ..
@@ -1300,12 +1339,40 @@ builder.Services.AddScoped<IExecutionEngine,      ExecutionEngine>();
 
 var app = builder.Build();
 
+// Log which generator is active so developers always know the mode on startup.
+// There is no silent fallback — the warning is intentional.
+var logger = app.Services.GetRequiredService<ILogger<Program>>();
+if (!string.IsNullOrWhiteSpace(openAiKey))
+    logger.LogInformation("Plan generator: OpenAiPlanGenerator (gpt-4o-mini, structured outputs)");
+else
+    logger.LogWarning(
+        "Plan generator: MockPlanGenerator (keyword matching only — no real NLP). " +
+        "To enable real NL intent extraction set OpenAI:ApiKey. " +
+        "See docs/build-from-scratch.md §14.1 for how to obtain and configure a key.");
+
 // Configure the HTTP pipeline
 app.UseSwagger();
 app.UseSwaggerUI();
+app.UseAuthentication();
+app.UseAuthorization();
 app.MapControllers();
 app.Run();
 ```
+
+Also create `appsettings.json` in the API project root (next to `Program.cs`).
+This file provides the `OpenAI:ApiKey` config key — left empty so the app starts
+in mock mode by default. Never put your real key here:
+
+```json
+{
+  "OpenAI": {
+    "ApiKey": ""
+  }
+}
+```
+
+Your real key goes in User Secrets (see §14.1) which override this file locally
+and are never committed to git.
 
 **Concept — `AddSingleton` vs `AddScoped`:**
 
