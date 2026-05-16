@@ -1506,13 +1506,16 @@ elims-insight-assistant-ui/
 > **If you are building your own project from scratch:** run the `ng new` command
 > above, then follow every step in this Part to replace and add the files.
 
-After `ng new`, delete the generated `app.component.html` and `app.component.spec.ts`
-— we will write the root component as a single TypeScript file with an inline template:
+After `ng new`, delete **only** the generated HTML template and spec file — do NOT
+delete `app.component.ts` itself, you will replace its contents in §13.3:
 
 ```bash
 rm src/app/app.component.html
 rm src/app/app.component.spec.ts
 ```
+
+> **Tip:** If you accidentally deleted `app.component.ts`, recreate it — the full
+> replacement content is in §13.3 below.
 
 Now create the feature folder structure:
 
@@ -1573,7 +1576,9 @@ bootstrapApplication(AppComponent, {
 
 ### 13.3 Root component — `src/app/app.component.ts`
 
-Replace the contents of `app.component.ts` with:
+Open `src/app/app.component.ts` (created by `ng new`) and **replace its entire
+contents** with the following. If you accidentally deleted the file, create it fresh
+at that path with the same content:
 
 ```typescript
 import { Component } from '@angular/core';
@@ -1596,7 +1601,12 @@ export class AppComponent {}
 
 ### 13.4 Create the Models
 
-`src/app/features/insight-assistant/models/assistant-query-request.model.ts`:
+You need **four** model files. Create each one inside
+`src/app/features/insight-assistant/models/` and make sure every file has the
+content below saved before you build. An empty file with the right name is not
+enough — the TypeScript compiler needs the exported interfaces.
+
+`assistant-query-request.model.ts`:
 ```typescript
 export interface UserContext {
   userId: string;
@@ -1610,7 +1620,36 @@ export interface AssistantQueryRequest {
 }
 ```
 
-`src/app/features/insight-assistant/models/study-completion-result.model.ts`:
+`execution-plan.model.ts`:
+```typescript
+export interface PlanFilter {
+  field: string;
+  op: string;
+  value: string | null;
+}
+
+export interface PlanOperation {
+  service: string;
+  action: string;
+  select: string[];
+  filters: PlanFilter[];
+}
+
+export interface PlanLimits {
+  maxRows: number;
+  pagination: boolean;
+}
+
+export interface ExecutionPlan {
+  version: string;
+  intent: string;
+  entities: string[];
+  operations: PlanOperation[];
+  limits: PlanLimits;
+}
+```
+
+`study-completion-result.model.ts`:
 ```typescript
 export interface StudyCompletionResult {
   studyId: string;
@@ -1624,7 +1663,7 @@ export interface StudyCompletionResult {
 }
 ```
 
-`src/app/features/insight-assistant/models/assistant-query-response.model.ts`:
+`assistant-query-response.model.ts`:
 ```typescript
 import { ExecutionPlan } from './execution-plan.model';
 import { StudyCompletionResult } from './study-completion-result.model';
@@ -1691,6 +1730,18 @@ HTTP calls to the backend. `@Injectable({ providedIn: 'root' })` registers it wi
 Angular's DI container as a singleton — available everywhere in the app.
 
 ### 13.6 Create the Component
+
+You need three files for this component. Create all three before building.
+
+First, create the **empty stylesheet** — the component references it and the build
+fails if it doesn't exist, even if it has no content yet:
+
+`src/app/features/insight-assistant/insight-assistant.component.scss`:
+```scss
+/* add component styles here */
+```
+
+Now create the **TypeScript class**:
 
 `src/app/features/insight-assistant/insight-assistant.component.ts`:
 ```typescript
@@ -1806,13 +1857,21 @@ This installs Angular 21, RxJS, zone.js, and the esbuild build tooling into `nod
 `node_modules/` is listed in `.gitignore` and is never committed — every developer runs
 `npm install` after cloning.
 
+> **If `ng build` fails with `Could not resolve "zone.js"`** even after `npm install`,
+> zone.js was not picked up correctly. Install it explicitly:
+> ```bash
+> npm install zone.js --save
+> ```
+> This adds it to `node_modules/` and updates `package.json`. Then retry the build.
+
 ### 13.8 Proxy for local development
 
 When Angular runs on port 4200 and the API runs on port 5000, the browser blocks
 cross-origin requests. The proxy forwards Angular's `/api` calls to the backend
 so the browser never sees a cross-origin request.
 
-`proxy.conf.json` (at the project root, **not** inside `src/`):
+**Step 1 — Create `proxy.conf.json`** at the project root (same level as `angular.json`,
+NOT inside `src/`):
 ```json
 {
   "/api": {
@@ -1823,11 +1882,62 @@ so the browser never sees a cross-origin request.
 }
 ```
 
-`angular.json` wires this in under `projects > ... > architect > serve > options`:
+**Step 2 — Wire it into `angular.json`**
+
+`proxyConfig` belongs in the **`serve`** section, not the `build` section.
+`ng new` generates both sections — find `serve` and add `proxyConfig` to its `options`:
+
 ```json
-"options": {
-  "proxyConfig": "proxy.conf.json"
+"architect": {
+  "build": {
+    "builder": "@angular/build:application",
+    "options": {
+      "outputPath": "dist/elims-insight-assistant-ui",
+      "index": "src/index.html",
+      "browser": "src/main.ts",
+      "polyfills": ["zone.js"],
+      "tsConfig": "tsconfig.app.json",
+      "styles": ["src/styles.scss"],
+      "scripts": []
+    },
+    ...
+  },
+  "serve": {
+    "builder": "@angular/build:dev-server",
+    "options": {
+      "proxyConfig": "proxy.conf.json"    ← ADD THIS HERE, inside serve not build
+    },
+    "configurations": {
+      "production": {
+        "buildTarget": "elims-insight-assistant-ui:build:production"
+      },
+      "development": {
+        "buildTarget": "elims-insight-assistant-ui:build:development"
+      }
+    },
+    "defaultConfiguration": "development"
+  }
 }
+```
+
+> **Common mistake:** `ng new` puts `proxyConfig` in `build > options` if you add it
+> there by accident. The proxy only applies to `ng serve`, so it must live in
+> `serve > options`. Putting it in `build` has no effect and is silently ignored.
+
+**Step 3 — Remove the `assets` entry pointing to `public/`**
+
+`ng new` adds an assets block that copies everything from a `public/` directory.
+That directory does not exist in this project. Delete these lines from `build > options`
+or the build will fail on a clean checkout:
+
+```json
+// DELETE THIS BLOCK from build > options:
+"assets": [
+  {
+    "glob": "**/*",
+    "input": "public"
+  }
+],
 ```
 
 ### 13.9 Build and run the frontend
@@ -2140,6 +2250,23 @@ Your request body must include both `"StudyViewer"` and `"CoreLabsViewer"` in ro
 **"No results returned"**
 Check `legalEntities` in your request. The EU seed data requires `"EU"` in the list.
 S3 (BioTest) is a US entity and will only appear if `"US"` is included.
+
+**`NG2008: Could not find stylesheet file './insight-assistant.component.scss'`**
+The component's `styleUrls` references a `.scss` file that must exist on disk even
+if it has no content. Create it manually:
+```
+src/app/features/insight-assistant/insight-assistant.component.scss
+```
+Leave it empty or add a comment — the build just needs the file to be present.
+
+**`TS2307: Cannot find module './execution-plan.model'`**
+The file `execution-plan.model.ts` is missing or empty. Create it with the full
+`ExecutionPlan` interface content from §13.4. An empty file is not enough —
+the TypeScript compiler needs the exported interfaces inside it.
+
+**`Could not resolve "zone.js"` after npm install**
+Run `npm install zone.js --save` explicitly. Sometimes `npm install` reports
+"up to date" but zone.js was not in `package.json` and so was never installed.
 
 **Angular blank page**
 Ensure both the backend (`dotnet run`) and frontend (`npx ng serve`) are running.
