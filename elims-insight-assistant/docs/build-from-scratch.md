@@ -2008,6 +2008,16 @@ dotnet user-secrets set "OpenAI:ApiKey" "sk-proj-..."
 The key is stored in your OS user profile, not in the project folder.
 It is never included when you share or push the code.
 
+> **If you see: `Could not find the global property 'UserSecretsId'`**
+> The `.csproj` file is missing the `<UserSecretsId>` property. It is already
+> present in this repository's `.csproj`, but if you created your own project
+> you need to add it inside `<PropertyGroup>`:
+> ```xml
+> <UserSecretsId>elims-insight-assistant-api</UserSecretsId>
+> ```
+> The value can be any unique string — a project name works fine. Save the file
+> then re-run `dotnet user-secrets set`.
+
 **Option B — Environment variable**
 ```bash
 # Mac / Linux
@@ -2044,23 +2054,174 @@ they were never hardcoded:
 - *"Show me overdue trials"*
 - *"Find studies that finished after the planned date"*
 
-### Step 14.2 — Terminal 1: Backend API
+### Step 14.2 — Build and run the backend
+
+Open a terminal (Terminal 1) and navigate to the API project:
+
 ```bash
 cd elims-insight-assistant/backend/src/ElimsInsightAssistant.Api
+```
+
+**Step A — Restore packages**
+
+This downloads all NuGet packages (OpenAI SDK, Swashbuckle, etc.) listed in the
+`.csproj` file into a local cache. Only needed once after cloning or adding a new package:
+
+```bash
+dotnet restore
+```
+
+Expected output:
+```
+Restored .../ElimsInsightAssistant.Api.csproj
+```
+
+**Step B — Build**
+
+Compiles all C# source files and checks for errors:
+
+```bash
+dotnet build
+```
+
+Expected output:
+```
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+```
+
+If you see errors here, fix them before continuing — `dotnet run` will also fail.
+
+**Step C — Run**
+
+Starts the API web server:
+
+```bash
 dotnet run --urls http://localhost:5000
 ```
 
-### Step 14.3 — Terminal 2: Frontend
-```bash
-cd elims-insight-assistant/frontend/elims-insight-assistant-ui
-ng serve
+Expected startup output:
+```
+warn: Program[0]
+      Plan generator: MockPlanGenerator (keyword matching only — no real NLP).
+      To enable real NL intent extraction set OpenAI:ApiKey.
+info: Microsoft.Hosting.Lifetime[14]
+      Now listening on: http://localhost:5000
+info: Microsoft.Hosting.Lifetime[0]
+      Application started. Press Ctrl+C to shut down.
 ```
 
-### Step 14.4 — Terminal 3: Tests
+> The `warn` line on startup is intentional — it tells you the app is in mock mode.
+> It is not an error. See Step 14.1 to enable real NLP with an OpenAI key.
+
+**Step D — Verify the backend is working**
+
+Open your browser and go to:
+```
+http://localhost:5000/swagger
+```
+
+You should see the Swagger UI listing all API endpoints. This confirms the backend
+is running and reachable. You can also test from the terminal:
+
+```bash
+curl -X POST http://localhost:5000/api/assistant/query \
+  -H "Content-Type: application/json" \
+  -d "{\"query\":\"Show delayed studies\",\"userContext\":{\"userId\":\"demo-user\",\"roles\":[\"StudyViewer\",\"CoreLabsViewer\"],\"legalEntities\":[\"EU\",\"US\"]}}"
+```
+
+Expected: a JSON response with `"status": "Completed"` and results.
+
+> **Windows PowerShell note:** curl in PowerShell behaves differently. Use this instead:
+> ```powershell
+> Invoke-RestMethod -Uri http://localhost:5000/api/assistant/query `
+>   -Method Post `
+>   -ContentType "application/json" `
+>   -Body '{"query":"Show delayed studies","userContext":{"userId":"demo-user","roles":["StudyViewer","CoreLabsViewer"],"legalEntities":["EU","US"]}}'
+> ```
+
+### Step 14.3 — Run the frontend
+
+Open a **second terminal** (keep the backend running in Terminal 1):
+
+```bash
+cd elims-insight-assistant/frontend/elims-insight-assistant-ui
+npm install       # first time only
+npx ng serve
+```
+
+Expected output:
+```
+✔ Building...
+Watch mode enabled. Watching for file changes...
+  ➜  Local: http://localhost:4200/
+```
+
+Open `http://localhost:4200` in your browser. You should see the eLIMS Insight
+Assistant page with a query input and four example buttons.
+
+### Step 14.4 — Verify the frontend and backend are connected
+
+**How the connection works:**
+
+```
+Browser (port 4200)
+    │
+    │  POST /api/assistant/query
+    ▼
+Angular dev server (ng serve)
+    │
+    │  proxy.conf.json forwards /api/* to http://localhost:5000
+    ▼
+.NET backend (port 5000)
+    │
+    │  Returns JSON response
+    ▼
+Angular dev server
+    │
+    ▼
+Browser renders results
+```
+
+The browser never talks to port 5000 directly. The Angular dev server acts as a
+middleman, forwarding any request starting with `/api` to the backend. This avoids
+cross-origin (CORS) browser errors during development.
+
+**Verify the connection:**
+
+1. Make sure both terminals are running (backend on 5000, frontend on 4200)
+2. Open `http://localhost:4200`
+3. Click **Run Query**
+4. The Summary section should appear with: `On Time: 2 | Delayed: 1 | Indeterminate: 1`
+
+If the Summary appears — frontend and backend are connected correctly. ✓
+
+**If nothing appears after clicking Run Query:**
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Browser console shows `502 Bad Gateway` | Backend not running | Start `dotnet run` in Terminal 1 |
+| Browser console shows `ERR_CONNECTION_REFUSED` | Wrong port in proxy | Check `proxy.conf.json` targets port 5000 |
+| Page loads but results are empty | Role/entity mismatch | The service sends `StudyViewer` + `CoreLabsViewer` + `EU,US` — check `insight-assistant-api.service.ts` |
+| `ng serve` terminal shows `ECONNREFUSED 127.0.0.1:5000` | Backend stopped | Restart `dotnet run` |
+
+### Step 14.5 — Run the tests
+
+Open a **third terminal**:
+
 ```bash
 cd elims-insight-assistant/backend/src/ElimsInsightAssistant.Tests
 dotnet test --verbosity normal
 ```
+
+Expected output:
+```
+Passed! - Failed: 0, Passed: 17, Skipped: 0, Total: 17
+```
+
+All 17 tests should pass. Tests do not require the backend to be running — they
+run against the code directly in-process.
 
 ---
 
@@ -2307,6 +2468,13 @@ Look at the terminal where `dotnet run` is running to see the full exception.
 This only happens if `OpenAiPlanGenerator` is registered but the key is missing.
 The app normally falls back to `MockPlanGenerator` when the key is empty.
 Check `Program.cs` — the key check uses `string.IsNullOrWhiteSpace`.
+
+**`Could not find the global property 'UserSecretsId'` when running `dotnet user-secrets set`**
+The `.csproj` file is missing `<UserSecretsId>`. Add it inside `<PropertyGroup>`:
+```xml
+<UserSecretsId>elims-insight-assistant-api</UserSecretsId>
+```
+Save the `.csproj` then re-run `dotnet user-secrets set`.
 
 ---
 

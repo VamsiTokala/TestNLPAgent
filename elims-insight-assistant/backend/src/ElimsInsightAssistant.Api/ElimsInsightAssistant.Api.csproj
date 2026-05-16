@@ -3,6 +3,7 @@
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>elims-insight-assistant-api</UserSecretsId>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="OpenAI" Version="2.10.0" />
