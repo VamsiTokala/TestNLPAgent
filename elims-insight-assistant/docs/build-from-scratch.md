@@ -2008,6 +2008,16 @@ dotnet user-secrets set "OpenAI:ApiKey" "sk-proj-..."
 The key is stored in your OS user profile, not in the project folder.
 It is never included when you share or push the code.
 
+> **If you see: `Could not find the global property 'UserSecretsId'`**
+> The `.csproj` file is missing the `<UserSecretsId>` property. It is already
+> present in this repository's `.csproj`, but if you created your own project
+> you need to add it inside `<PropertyGroup>`:
+> ```xml
+> <UserSecretsId>elims-insight-assistant-api</UserSecretsId>
+> ```
+> The value can be any unique string — a project name works fine. Save the file
+> then re-run `dotnet user-secrets set`.
+
 **Option B — Environment variable**
 ```bash
 # Mac / Linux
@@ -2307,6 +2317,13 @@ Look at the terminal where `dotnet run` is running to see the full exception.
 This only happens if `OpenAiPlanGenerator` is registered but the key is missing.
 The app normally falls back to `MockPlanGenerator` when the key is empty.
 Check `Program.cs` — the key check uses `string.IsNullOrWhiteSpace`.
+
+**`Could not find the global property 'UserSecretsId'` when running `dotnet user-secrets set`**
+The `.csproj` file is missing `<UserSecretsId>`. Add it inside `<PropertyGroup>`:
+```xml
+<UserSecretsId>elims-insight-assistant-api</UserSecretsId>
+```
+Save the `.csproj` then re-run `dotnet user-secrets set`.
 
 ---
 
