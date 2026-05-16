@@ -1601,7 +1601,12 @@ export class AppComponent {}
 
 ### 13.4 Create the Models
 
-`src/app/features/insight-assistant/models/assistant-query-request.model.ts`:
+You need **four** model files. Create each one inside
+`src/app/features/insight-assistant/models/` and make sure every file has the
+content below saved before you build. An empty file with the right name is not
+enough — the TypeScript compiler needs the exported interfaces.
+
+`assistant-query-request.model.ts`:
 ```typescript
 export interface UserContext {
   userId: string;
@@ -1615,7 +1620,36 @@ export interface AssistantQueryRequest {
 }
 ```
 
-`src/app/features/insight-assistant/models/study-completion-result.model.ts`:
+`execution-plan.model.ts`:
+```typescript
+export interface PlanFilter {
+  field: string;
+  op: string;
+  value: string | null;
+}
+
+export interface PlanOperation {
+  service: string;
+  action: string;
+  select: string[];
+  filters: PlanFilter[];
+}
+
+export interface PlanLimits {
+  maxRows: number;
+  pagination: boolean;
+}
+
+export interface ExecutionPlan {
+  version: string;
+  intent: string;
+  entities: string[];
+  operations: PlanOperation[];
+  limits: PlanLimits;
+}
+```
+
+`study-completion-result.model.ts`:
 ```typescript
 export interface StudyCompletionResult {
   studyId: string;
@@ -1629,7 +1663,7 @@ export interface StudyCompletionResult {
 }
 ```
 
-`src/app/features/insight-assistant/models/assistant-query-response.model.ts`:
+`assistant-query-response.model.ts`:
 ```typescript
 import { ExecutionPlan } from './execution-plan.model';
 import { StudyCompletionResult } from './study-completion-result.model';
@@ -1696,6 +1730,18 @@ HTTP calls to the backend. `@Injectable({ providedIn: 'root' })` registers it wi
 Angular's DI container as a singleton — available everywhere in the app.
 
 ### 13.6 Create the Component
+
+You need three files for this component. Create all three before building.
+
+First, create the **empty stylesheet** — the component references it and the build
+fails if it doesn't exist, even if it has no content yet:
+
+`src/app/features/insight-assistant/insight-assistant.component.scss`:
+```scss
+/* add component styles here */
+```
+
+Now create the **TypeScript class**:
 
 `src/app/features/insight-assistant/insight-assistant.component.ts`:
 ```typescript
@@ -1810,6 +1856,13 @@ npm install
 This installs Angular 21, RxJS, zone.js, and the esbuild build tooling into `node_modules/`.
 `node_modules/` is listed in `.gitignore` and is never committed — every developer runs
 `npm install` after cloning.
+
+> **If `ng build` fails with `Could not resolve "zone.js"`** even after `npm install`,
+> zone.js was not picked up correctly. Install it explicitly:
+> ```bash
+> npm install zone.js --save
+> ```
+> This adds it to `node_modules/` and updates `package.json`. Then retry the build.
 
 ### 13.8 Proxy for local development
 
@@ -2197,6 +2250,23 @@ Your request body must include both `"StudyViewer"` and `"CoreLabsViewer"` in ro
 **"No results returned"**
 Check `legalEntities` in your request. The EU seed data requires `"EU"` in the list.
 S3 (BioTest) is a US entity and will only appear if `"US"` is included.
+
+**`NG2008: Could not find stylesheet file './insight-assistant.component.scss'`**
+The component's `styleUrls` references a `.scss` file that must exist on disk even
+if it has no content. Create it manually:
+```
+src/app/features/insight-assistant/insight-assistant.component.scss
+```
+Leave it empty or add a comment — the build just needs the file to be present.
+
+**`TS2307: Cannot find module './execution-plan.model'`**
+The file `execution-plan.model.ts` is missing or empty. Create it with the full
+`ExecutionPlan` interface content from §13.4. An empty file is not enough —
+the TypeScript compiler needs the exported interfaces inside it.
+
+**`Could not resolve "zone.js"` after npm install**
+Run `npm install zone.js --save` explicitly. Sometimes `npm install` reports
+"up to date" but zone.js was not in `package.json` and so was never installed.
 
 **Angular blank page**
 Ensure both the backend (`dotnet run`) and frontend (`npx ng serve`) are running.
