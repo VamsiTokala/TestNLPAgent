@@ -1896,7 +1896,145 @@ dotnet test --verbosity normal
 
 ---
 
-## Part 15 — Key Concepts Summary
+## Part 15 — UI Screens
+
+> These show what you see at `http://localhost:4200` after running `npm install && npx ng serve`
+> with the backend running at `http://localhost:5000`.
+
+### Screen 1 — Initial page (app loads)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  eLIMS Insight Assistant                                        │
+│  Governed Natural-Language Analytics                            │
+│                                                                 │
+│  Ask eLIMS  [Find studies not completed on time      ] [Run]   │
+│                                                                 │
+│  [Find studies not completed on time]  [Show delayed studies]  │
+│  [Show indeterminate studies]  [Show completed late studies]   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**What you see:**
+- A text input pre-filled with "Find studies not completed on time"
+- A **Run Query** button that calls the backend
+- Four example buttons — clicking any one sets the input and lets you run it
+
+### Screen 2 — After clicking Run Query
+
+The backend returns results within ~200 ms (mock mode) and the page expands:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  eLIMS Insight Assistant                                        │
+│  Governed Natural-Language Analytics                            │
+│                                                                 │
+│  Ask eLIMS  [Find studies not completed on time      ] [Run]   │
+│                                                                 │
+│  [Find studies not completed on time]  [Show delayed studies]  │
+│  [Show indeterminate studies]  [Show completed late studies]   │
+│                                                                 │
+│  ── Summary ───────────────────────────────────────────────── │
+│  On Time: 2 | Delayed: 1 | Indeterminate: 1                    │
+│                                                                 │
+│  ── Results ───────────────────────────────────────────────── │
+│  [                                                              │
+│    {                                                            │
+│      "studyId": "S2",                                           │
+│      "studyCode": "ST-002",                                     │
+│      "customer": "XYZ Labs",                                    │
+│      "plannedCompletionDate": "2026-04-15T00:00:00",           │
+│      "actualCompletionDate": "2026-04-17T09:30:00Z",           │
+│      "classification": "Delayed",                               │
+│      "reason": "Actual completion date is 2 days after         │
+│                 planned completion date.",                       │
+│      "dataQualityFlags": []                                     │
+│    },                                                           │
+│    {                                                            │
+│      "studyId": "S4",                                           │
+│      "studyCode": "ST-004",                                     │
+│      "customer": "Delta Bio",                                   │
+│      "plannedCompletionDate": null,                             │
+│      "actualCompletionDate": null,                              │
+│      "classification": "Indeterminate",                         │
+│      "reason": "Planned completion date or completed TestP      │
+│                 timestamp is missing.",                         │
+│      "dataQualityFlags": [                                      │
+│        "missing_planned_completion_date",                       │
+│        "no_completed_testps"                                    │
+│      ]                                                          │
+│    }                                                            │
+│  ]                                                              │
+│                                                                 │
+│  ── Generated Plan ────────────────────────────────────────── │
+│  # Analysis Plan                                                │
+│  Intent: Find studies not completed on time.                    │
+│  ## Steps                                                       │
+│  1. Fetch studies from Study Service.                           │
+│  2. Fetch completed TestPs from CoreLabs Service.               │
+│  3. Correlate Study and TestP records using studyId.            │
+│  ...                                                            │
+│                                                                 │
+│  ── JSON Execution Plan ───────────────────────────────────── │
+│  { "version": "1.0", "intent": "find_studies_not_completed_   │
+│    on_time", "entities": ["study", "testp"], ...  }             │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**What each section means:**
+
+| Section | What it shows |
+|---|---|
+| **Summary** | Aggregate count of all studies across all three classifications |
+| **Results** | Only the studies matching the query intent (e.g. Delayed + Indeterminate) |
+| **Generated Plan** | Human-readable markdown explaining what the system decided to do |
+| **JSON Execution Plan** | Machine-readable plan — the structured JSON the backend executed |
+
+### Screen 3 — Clicking an example button ("Show delayed studies")
+
+Clicking the button fills the input and you click Run. The summary counts are the same
+(all 4 seed studies are always evaluated), but the intent and results may differ when
+running with a real OpenAI key:
+
+```
+  On Time: 2 | Delayed: 1 | Indeterminate: 1
+
+  Results: [ { "studyCode": "ST-002", "classification": "Delayed", ... } ]
+```
+
+> **Mock mode note:** In mock mode (no API key), all four example queries map to the
+> same keyword-matched plan and produce identical results. With a real OpenAI key,
+> "Show delayed studies" produces a plan with `includeClassifications: ["Delayed"]`
+> only, filtering out the Indeterminate result.
+
+### How the data flows (UI → API → UI)
+
+```
+User types query
+      │
+      ▼
+[Run Query] clicked
+      │
+      ▼
+InsightAssistantApiService.query()
+  POST /api/assistant/query
+  Body: { query, userContext: { roles, legalEntities } }
+      │
+      ▼
+Backend: PlanGenerator → Validator → ExecutionEngine → Response
+      │
+      ▼
+AssistantQueryResponse arrives
+  { status, summary, results, markdownPlan, jsonPlan, validation }
+      │
+      ▼
+Component binds response to template
+  *ngIf="response" reveals Summary + Results + Plan sections
+```
+
+---
+
+## Part 16 — Key Concepts Summary
 
 | Concept | What It Means | Where Used |
 |---|---|---|
