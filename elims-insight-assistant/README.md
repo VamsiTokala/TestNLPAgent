@@ -85,6 +85,41 @@ curl -X POST http://localhost:5000/api/assistant/query \
 
 Expected: ST-002 (Delayed, 2 days late) and ST-004 (Indeterminate, missing data).
 
+## UI Overview
+
+Open `http://localhost:4200` after starting both backend and frontend.
+
+**Initial state** — input pre-filled, four example buttons:
+```
+eLIMS Insight Assistant
+Governed Natural-Language Analytics
+
+Ask eLIMS  [Find studies not completed on time      ] [Run Query]
+
+[Find studies not completed on time] [Show delayed studies]
+[Show indeterminate studies] [Show completed late studies]
+```
+
+**After clicking Run Query** — four sections appear below:
+```
+── Summary ──────────────────────────────────────
+On Time: 2 | Delayed: 1 | Indeterminate: 1
+
+── Results ──────────────────────────────────────
+ST-002 (XYZ Labs)  → Delayed        2 days after planned date
+ST-004 (Delta Bio) → Indeterminate  Missing planned/actual dates
+
+── Generated Plan ───────────────────────────────
+# Analysis Plan
+Intent: Find studies not completed on time.
+Steps: Fetch studies → Fetch TestPs → Correlate → Classify → Return
+
+── JSON Execution Plan ──────────────────────────
+{ "version": "1.0", "intent": "find_studies_not_completed_on_time", ... }
+```
+
+See `docs/build-from-scratch.md §Part 15` for annotated screen-by-screen walkthrough.
+
 ## API Endpoints
 
 | Method | Endpoint | Description |
