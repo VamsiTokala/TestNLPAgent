@@ -1506,13 +1506,16 @@ elims-insight-assistant-ui/
 > **If you are building your own project from scratch:** run the `ng new` command
 > above, then follow every step in this Part to replace and add the files.
 
-After `ng new`, delete the generated `app.component.html` and `app.component.spec.ts`
-— we will write the root component as a single TypeScript file with an inline template:
+After `ng new`, delete **only** the generated HTML template and spec file — do NOT
+delete `app.component.ts` itself, you will replace its contents in §13.3:
 
 ```bash
 rm src/app/app.component.html
 rm src/app/app.component.spec.ts
 ```
+
+> **Tip:** If you accidentally deleted `app.component.ts`, recreate it — the full
+> replacement content is in §13.3 below.
 
 Now create the feature folder structure:
 
@@ -1573,7 +1576,9 @@ bootstrapApplication(AppComponent, {
 
 ### 13.3 Root component — `src/app/app.component.ts`
 
-Replace the contents of `app.component.ts` with:
+Open `src/app/app.component.ts` (created by `ng new`) and **replace its entire
+contents** with the following. If you accidentally deleted the file, create it fresh
+at that path with the same content:
 
 ```typescript
 import { Component } from '@angular/core';
