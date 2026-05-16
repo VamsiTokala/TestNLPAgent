@@ -1817,7 +1817,8 @@ When Angular runs on port 4200 and the API runs on port 5000, the browser blocks
 cross-origin requests. The proxy forwards Angular's `/api` calls to the backend
 so the browser never sees a cross-origin request.
 
-`proxy.conf.json` (at the project root, **not** inside `src/`):
+**Step 1 — Create `proxy.conf.json`** at the project root (same level as `angular.json`,
+NOT inside `src/`):
 ```json
 {
   "/api": {
@@ -1828,11 +1829,62 @@ so the browser never sees a cross-origin request.
 }
 ```
 
-`angular.json` wires this in under `projects > ... > architect > serve > options`:
+**Step 2 — Wire it into `angular.json`**
+
+`proxyConfig` belongs in the **`serve`** section, not the `build` section.
+`ng new` generates both sections — find `serve` and add `proxyConfig` to its `options`:
+
 ```json
-"options": {
-  "proxyConfig": "proxy.conf.json"
+"architect": {
+  "build": {
+    "builder": "@angular/build:application",
+    "options": {
+      "outputPath": "dist/elims-insight-assistant-ui",
+      "index": "src/index.html",
+      "browser": "src/main.ts",
+      "polyfills": ["zone.js"],
+      "tsConfig": "tsconfig.app.json",
+      "styles": ["src/styles.scss"],
+      "scripts": []
+    },
+    ...
+  },
+  "serve": {
+    "builder": "@angular/build:dev-server",
+    "options": {
+      "proxyConfig": "proxy.conf.json"    ← ADD THIS HERE, inside serve not build
+    },
+    "configurations": {
+      "production": {
+        "buildTarget": "elims-insight-assistant-ui:build:production"
+      },
+      "development": {
+        "buildTarget": "elims-insight-assistant-ui:build:development"
+      }
+    },
+    "defaultConfiguration": "development"
+  }
 }
+```
+
+> **Common mistake:** `ng new` puts `proxyConfig` in `build > options` if you add it
+> there by accident. The proxy only applies to `ng serve`, so it must live in
+> `serve > options`. Putting it in `build` has no effect and is silently ignored.
+
+**Step 3 — Remove the `assets` entry pointing to `public/`**
+
+`ng new` adds an assets block that copies everything from a `public/` directory.
+That directory does not exist in this project. Delete these lines from `build > options`
+or the build will fail on a clean checkout:
+
+```json
+// DELETE THIS BLOCK from build > options:
+"assets": [
+  {
+    "glob": "**/*",
+    "input": "public"
+  }
+],
 ```
 
 ### 13.9 Build and run the frontend
