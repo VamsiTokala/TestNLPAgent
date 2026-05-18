@@ -30,7 +30,12 @@ public interface IPlanGenerator
 public class MockPlanGenerator : IPlanGenerator
 {
     private static readonly string[] SupportedTerms =
-        ["not completed on time", "delayed studies", "completed late", "not on time", "indeterminate"];
+    [
+        "not completed on time", "delayed studies", "completed late", "not on time",
+        "indeterminate", "classification indeterminate", "classification delayed",
+        "classification on time", "filter studies", "show delayed", "show indeterminate",
+        "show on time", "show all studies"
+    ];
 
     public Task<PlanGeneratorResult> GenerateAsync(string query)
     {
@@ -40,7 +45,9 @@ public class MockPlanGenerator : IPlanGenerator
                 string.Empty, null,
                 "This demo currently supports queries related to study completion timeliness."));
 
-        var markdown = """
+        var classifications = ResolveClassifications(q);
+
+        var markdown = $"""
 # Analysis Plan
 Intent: Find studies not completed on time.
 
@@ -56,7 +63,7 @@ Intent: Find studies not completed on time.
 5. Derive actual study completion as the maximum TestP completedAt timestamp.
 6. Compare actual completion date with planned completion date.
 7. Classify each study as On Time, Delayed, or Indeterminate.
-8. Return Delayed and Indeterminate studies with supporting details.
+8. Return {string.Join(" and ", classifications)} studies with supporting details.
 
 ## Execution mode
 Read-only, deterministic, approved service contracts only.
@@ -73,10 +80,34 @@ Read-only, deterministic, approved service contracts only.
                 new("corelabs-service", "listTestPs",
                     ["testpId", "studyId", "status", "completedAt", "runType", "result"],
                     [new("status", "=", "Completed")])
-            ]
+            ],
+            Output = new PlanOutput(classifications)
         };
 
         return Task.FromResult(new PlanGeneratorResult(markdown, plan, null));
+    }
+
+    private static List<string> ResolveClassifications(string q)
+    {
+        // Explicit "classification X" pattern takes precedence
+        if (q.Contains("classification indeterminate")) return ["Indeterminate"];
+        if (q.Contains("classification delayed")) return ["Delayed"];
+        if (q.Contains("classification on time")) return ["On Time"];
+
+        // "show all" or combinations
+        if (q.Contains("show all studies") || (q.Contains("on time") && q.Contains("delayed") && q.Contains("indeterminate")))
+            return ["On Time", "Delayed", "Indeterminate"];
+
+        // Single-classification requests
+        bool wantsDelayed     = q.Contains("delayed") || q.Contains("completed late") || q.Contains("not on time") || q.Contains("not completed on time");
+        bool wantsIndeterminate = q.Contains("indeterminate");
+        bool wantsOnTime      = q.Contains("on time") && !wantsDelayed;
+
+        if (wantsOnTime && !wantsDelayed && !wantsIndeterminate) return ["On Time"];
+        if (wantsDelayed && !wantsIndeterminate) return ["Delayed"];
+        if (wantsIndeterminate && !wantsDelayed) return ["Indeterminate"];
+
+        return ["Delayed", "Indeterminate"];
     }
 }
 
@@ -94,7 +125,14 @@ public class GeminiPlanGenerator : IPlanGenerator
 You are a governed analytics plan generator for a laboratory information management system (LIMS).
 
 Given a natural language query, decide whether it is asking about study completion timeliness
-(delayed studies, not completed on time, late, overdue, indeterminate completion, missed deadline, etc.).
+or filtering studies by their completion classification (On Time, Delayed, Indeterminate).
+
+SUPPORTED QUERY TYPES (set supported = true):
+- Studies not completed on time: delayed, overdue, late, missed deadline
+- Indeterminate studies: missing planned or actual completion date
+- Filter/show studies by classification: "filter studies with classification X",
+  "show delayed studies", "show indeterminate studies", "show on time studies"
+- Any combination of the above classifications
 
 ALLOWED SERVICES AND FIELDS:
   study-service    → action: listStudies → fields: studyId, studyCode, customer, legalEntity, plannedCompletionDate
@@ -104,11 +142,24 @@ ALLOWED FILTER OPERATORS: =, !=, >, >=, <, <=, in, between, is null, is not null
 ALLOWED AGGREGATE FUNCTIONS: max, min, count, sum, avg
 MAX ROWS LIMIT: 500
 
-If the query IS about study completion timeliness:
+CLASSIFICATION RULES:
+- "On Time": actualCompletionDate <= plannedCompletionDate (both dates present)
+- "Delayed": actualCompletionDate > plannedCompletionDate (both dates present)
+- "Indeterminate": plannedCompletionDate is null OR actualCompletionDate is null
+
+SET output.includeClassifications based on the query intent:
+- "show delayed studies" or "not completed on time" or "late" → ["Delayed", "Indeterminate"]
+- "show only delayed" or "filter studies with classification Delayed" → ["Delayed"]
+- "show only indeterminate" or "filter studies with classification Indeterminate" → ["Indeterminate"]
+- "show on time studies" or "filter studies with classification On Time" → ["On Time"]
+- "show all studies" or all three classifications requested → ["On Time", "Delayed", "Indeterminate"]
+
+If the query IS about study completion timeliness or classification filtering:
   - Set supported = true
   - Set reason = null
   - Write a clear markdown plan explaining the steps
-  - Populate plan with version "1.0", intent "find_studies_not_completed_on_time", the two operations, and limits maxRows 500
+  - Populate plan with version "1.0", intent "find_studies_not_completed_on_time", the two operations,
+    output.includeClassifications set according to the rules above, and limits maxRows 500
 
 If the query is NOT about study completion timeliness:
   - Set supported = false
@@ -128,6 +179,9 @@ Respond ONLY with a JSON object matching this exact structure (no markdown fence
       { "service": "study-service", "action": "listStudies", "select": [...], "filters": [] },
       { "service": "corelabs-service", "action": "listTestPs", "select": [...], "filters": [{"field":"status","op":"=","value":"Completed"}] }
     ],
+    "output": {
+      "includeClassifications": ["Delayed", "Indeterminate"]
+    },
     "limits": { "maxRows": 500, "pagination": false }
   }
 }
@@ -253,6 +307,17 @@ public class OpenAiPlanGenerator : IPlanGenerator
                     "additionalProperties": false
                   }
                 },
+                "output": {
+                  "type": "object",
+                  "properties": {
+                    "includeClassifications": {
+                      "type": "array",
+                      "items": { "type": "string" }
+                    }
+                  },
+                  "required": ["includeClassifications"],
+                  "additionalProperties": false
+                },
                 "limits": {
                   "type": "object",
                   "properties": {
@@ -263,7 +328,7 @@ public class OpenAiPlanGenerator : IPlanGenerator
                   "additionalProperties": false
                 }
               },
-              "required": ["version", "intent", "entities", "operations", "limits"],
+              "required": ["version", "intent", "entities", "operations", "output", "limits"],
               "additionalProperties": false
             },
             { "type": "null" }
@@ -279,7 +344,14 @@ public class OpenAiPlanGenerator : IPlanGenerator
 You are a governed analytics plan generator for a laboratory information management system (LIMS).
 
 Given a natural language query, decide whether it is asking about study completion timeliness
-(delayed studies, not completed on time, late, overdue, indeterminate completion, missed deadline, etc.).
+or filtering studies by their completion classification (On Time, Delayed, Indeterminate).
+
+SUPPORTED QUERY TYPES (set supported = true):
+- Studies not completed on time: delayed, overdue, late, missed deadline
+- Indeterminate studies: missing planned or actual completion date
+- Filter/show studies by classification: "filter studies with classification X",
+  "show delayed studies", "show indeterminate studies", "show on time studies"
+- Any combination of the above classifications
 
 ALLOWED SERVICES AND FIELDS:
   study-service    → action: listStudies → fields: studyId, studyCode, customer, legalEntity, plannedCompletionDate
@@ -289,11 +361,24 @@ ALLOWED FILTER OPERATORS: =, !=, >, >=, <, <=, in, between, is null, is not null
 ALLOWED AGGREGATE FUNCTIONS: max, min, count, sum, avg
 MAX ROWS LIMIT: 500
 
-If the query IS about study completion timeliness:
+CLASSIFICATION RULES:
+- "On Time": actualCompletionDate <= plannedCompletionDate (both dates present)
+- "Delayed": actualCompletionDate > plannedCompletionDate (both dates present)
+- "Indeterminate": plannedCompletionDate is null OR actualCompletionDate is null
+
+SET output.includeClassifications based on the query intent:
+- "show delayed studies" or "not completed on time" or "late" → ["Delayed", "Indeterminate"]
+- "show only delayed" or "filter studies with classification Delayed" → ["Delayed"]
+- "show only indeterminate" or "filter studies with classification Indeterminate" → ["Indeterminate"]
+- "show on time studies" or "filter studies with classification On Time" → ["On Time"]
+- "show all studies" or all three classifications requested → ["On Time", "Delayed", "Indeterminate"]
+
+If the query IS about study completion timeliness or classification filtering:
   - Set supported = true
   - Set reason = null
   - Write a clear markdown plan explaining the steps
-  - Populate plan with version "1.0", intent "find_studies_not_completed_on_time", the two operations, and limits maxRows 500
+  - Populate plan with version "1.0", intent "find_studies_not_completed_on_time", the two operations,
+    output.includeClassifications set according to the rules above, and limits maxRows 500
 
 If the query is NOT about study completion timeliness:
   - Set supported = false
