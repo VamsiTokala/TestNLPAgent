@@ -16,7 +16,7 @@ Every query is validated against an allowlist before anything runs. Every query 
 
 | Mode | Activated when | Behaviour |
 |---|---|---|
-| **Gemini** (`gemini-1.5-flash`) | `Gemini:ApiKey` is configured (recommended — free tier) | Real NL intent extraction — understands paraphrases like "overdue trials", "missed deadline" |
+| **Gemini** (`gemini-2.5-flash`) | `Gemini:ApiKey` is configured (recommended — free tier) | Real NL intent extraction — understands paraphrases like "overdue trials", "missed deadline" |
 | **OpenAI** (`gpt-4o-mini`) | `OpenAI:ApiKey` is configured (no Gemini key) | Real NL intent extraction with strict JSON schema |
 | **Mock** (keyword match) | No API key (default) | Matches hardcoded phrases — suitable for local dev and tests without an API key |
 
@@ -54,7 +54,7 @@ set Gemini__ApiKey=AIza...      # Windows
 
 When the Gemini key is set, startup logs:
 ```
-info: Plan generator: GeminiPlanGenerator (gemini-1.5-flash, JSON mode)
+info: Plan generator: GeminiPlanGenerator (gemini-2.5-flash, JSON mode)
 ```
 
 #### Option B — OpenAI (requires billing)

@@ -33,7 +33,7 @@ app.MapControllers();
 // Log active mode clearly at startup so there is no silent fallback to mock
 var logger = app.Services.GetRequiredService<ILogger<Program>>();
 if (!string.IsNullOrWhiteSpace(geminiKey))
-    logger.LogInformation("Plan generator: GeminiPlanGenerator (gemini-1.5-flash, JSON mode)");
+    logger.LogInformation("Plan generator: GeminiPlanGenerator (gemini-2.5-flash, JSON mode)");
 else if (!string.IsNullOrWhiteSpace(openAiKey))
     logger.LogInformation("Plan generator: OpenAiPlanGenerator (gpt-4o-mini, structured outputs)");
 else

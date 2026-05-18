@@ -786,7 +786,7 @@ User query: {QUERY}
 
         var googleAi = new GoogleAI(apiKey: apiKey);
         _model = googleAi.GenerativeModel(
-            model: "gemini-1.5-flash",
+            model: "gemini-2.5-flash",
             generationConfig: new GenerationConfig { ResponseMimeType = "application/json" });
     }
 
@@ -1464,7 +1464,7 @@ var app = builder.Build();
 // Log active mode clearly at startup so there is no silent fallback to mock
 var logger = app.Services.GetRequiredService<ILogger<Program>>();
 if (!string.IsNullOrWhiteSpace(geminiKey))
-    logger.LogInformation("Plan generator: GeminiPlanGenerator (gemini-1.5-flash, JSON mode)");
+    logger.LogInformation("Plan generator: GeminiPlanGenerator (gemini-2.5-flash, JSON mode)");
 else if (!string.IsNullOrWhiteSpace(openAiKey))
     logger.LogInformation("Plan generator: OpenAiPlanGenerator (gpt-4o-mini, structured outputs)");
 else
@@ -2249,7 +2249,7 @@ export OpenAI__ApiKey=sk-proj-...
 Every time the API starts, it logs one line before anything else:
 ```
 # With a Gemini key:
-info: Plan generator: GeminiPlanGenerator (gemini-1.5-flash, JSON mode)
+info: Plan generator: GeminiPlanGenerator (gemini-2.5-flash, JSON mode)
 
 # With an OpenAI key (and no Gemini key):
 info: Plan generator: OpenAiPlanGenerator (gpt-4o-mini, structured outputs)
@@ -2264,7 +2264,7 @@ If you see the `warn` line, you are in mock mode. The warning is intentional —
 **How the app chooses which generator to use (priority order):**
 ```
 Gemini:ApiKey present and non-empty?
-  YES → GeminiPlanGenerator  (real NLP via gemini-1.5-flash, JSON mode, free tier)
+  YES → GeminiPlanGenerator  (real NLP via gemini-2.5-flash, JSON mode, free tier)
   NO  →
     OpenAI:ApiKey present and non-empty?
       YES → OpenAiPlanGenerator  (real NLP via gpt-4o-mini, strict JSON schema)
@@ -2338,7 +2338,7 @@ info: Microsoft.Hosting.Lifetime[0]
 Expected startup output (Gemini key set):
 ```
 info: Program[0]
-      Plan generator: GeminiPlanGenerator (gemini-1.5-flash, JSON mode)
+      Plan generator: GeminiPlanGenerator (gemini-2.5-flash, JSON mode)
 info: Microsoft.Hosting.Lifetime[14]
       Now listening on: http://localhost:5000
 ```
@@ -2462,7 +2462,7 @@ run against the code directly in-process.
 
 | | Mock mode (no key) | Gemini mode (recommended) | OpenAI mode |
 |---|---|---|---|
-| **How it works** | Keyword matching in code | gemini-1.5-flash generates a JSON plan | gpt-4o-mini generates a JSON plan |
+| **How it works** | Keyword matching in code | gemini-2.5-flash generates a JSON plan | gpt-4o-mini generates a JSON plan |
 | **Startup log** | `warn: MockPlanGenerator` | `info: GeminiPlanGenerator` | `info: OpenAiPlanGenerator` |
 | **Cost** | Free — no API call | Free tier — hundreds of queries/day | ~$0.15 per million tokens |
 | **Billing required** | No | No — Google AI Studio key only | Yes — card required |
@@ -2524,7 +2524,7 @@ dotnet run --urls http://localhost:5000
 
 Expected startup:
 ```
-info: Plan generator: GeminiPlanGenerator (gemini-1.5-flash, JSON mode)
+info: Plan generator: GeminiPlanGenerator (gemini-2.5-flash, JSON mode)
 ```
 
 **Test with free-text queries that mock mode cannot handle:**
@@ -2632,7 +2632,7 @@ they only know about `IPlanGenerator`, not which provider is behind it.
 
 | Provider | Model | Structured outputs | Free tier | Key format |
 |---|---|---|---|---|
-| Google Gemini (default) | gemini-1.5-flash | JSON mode (`ResponseMimeType`) | Yes — hundreds/day | `AIza...` |
+| Google Gemini (default) | gemini-2.5-flash | JSON mode (`ResponseMimeType`) | Yes — hundreds/day | `AIza...` |
 | OpenAI | gpt-4o-mini | `CreateJsonSchemaFormat` (strict) | No — billing required | `sk-proj-...` |
 | Anthropic Claude | claude-haiku-4-5 | Tool use / JSON mode | No — billing required | `sk-ant-...` |
 

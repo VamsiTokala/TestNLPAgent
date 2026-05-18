@@ -6,7 +6,7 @@
 User query
     ↓
 IPlanGenerator (async)
-    ├── GeminiPlanGenerator  — when Gemini:ApiKey is configured (gemini-1.5-flash, JSON mode) [recommended]
+    ├── GeminiPlanGenerator  — when Gemini:ApiKey is configured (gemini-2.5-flash, JSON mode) [recommended]
     ├── OpenAiPlanGenerator  — when OpenAI:ApiKey is configured (gpt-4o-mini, strict JSON schema)
     └── MockPlanGenerator    — fallback when no key is set (keyword matching, no API call)
     ↓
@@ -31,7 +31,7 @@ HTTP response (JSON)
 
 | Mode | Class | Activated when | How It Works |
 |---|---|---|---|
-| **Gemini** (recommended) | `GeminiPlanGenerator` | `Gemini:ApiKey` is set | Sends query + prompt to gemini-1.5-flash with JSON mode (`ResponseMimeType = application/json`); parses JSON response into `ExecutionPlan` |
+| **Gemini** (recommended) | `GeminiPlanGenerator` | `Gemini:ApiKey` is set | Sends query + prompt to gemini-2.5-flash with JSON mode (`ResponseMimeType = application/json`); parses JSON response into `ExecutionPlan` |
 | **OpenAI** | `OpenAiPlanGenerator` | `OpenAI:ApiKey` is set, no Gemini key | Sends query + system prompt to gpt-4o-mini with strict JSON schema; parses schema-constrained response into `ExecutionPlan` |
 | **Mock** | `MockPlanGenerator` | No API key (local dev, CI, tests) | Lowercases query, checks hardcoded phrase list, returns fixed plan — no network call |
 
