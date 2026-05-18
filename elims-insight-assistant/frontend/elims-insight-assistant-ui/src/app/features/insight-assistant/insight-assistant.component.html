@@ -1,28 +1,117 @@
-<h1>eLIMS Insight Assistant</h1>
-<h3>Governed Natural-Language Analytics</h3>
-<div>
-  <label>Ask eLIMS</label>
-  <input [formControl]="queryControl" />
-  <button (click)="runQuery()">Run Query</button>
-</div>
-<div>
-  <button *ngFor="let ex of examples" (click)="setQuery(ex)">{{ ex }}</button>
-</div>
-<div *ngIf="error">
-  <p><strong>Error:</strong> {{ error }}</p>
-</div>
-<div *ngIf="response">
-  <ng-container *ngIf="response.status !== 'Completed'; else completedBlock">
-    <p><strong>Not supported:</strong> {{ response.message }}</p>
+<div class="assistant-wrap">
+
+  <!-- Header -->
+  <div class="header">
+    <h1>eLIMS Insight Assistant</h1>
+    <p class="subtitle">Governed Natural-Language Analytics</p>
+  </div>
+
+  <!-- Query card -->
+  <div class="query-card">
+    <label>Ask eLIMS</label>
+    <div class="query-row">
+      <input [formControl]="queryControl" placeholder="e.g. Show indeterminate studies" />
+      <button class="btn-run" (click)="runQuery()">Run Query</button>
+    </div>
+    <div class="quick-links">
+      <span class="ql-label">Try:</span>
+      <button class="chip" *ngFor="let ex of examples" (click)="setQuery(ex)">{{ ex }}</button>
+    </div>
+  </div>
+
+  <!-- HTTP error -->
+  <div *ngIf="error" class="alert alert-error">
+    <strong>Error:</strong> {{ error }}
+  </div>
+
+  <!-- Response -->
+  <ng-container *ngIf="response">
+
+    <!-- Unsupported query -->
+    <div *ngIf="response.status !== 'Completed'" class="alert alert-warning">
+      <strong>Not supported:</strong> {{ response.message }}
+    </div>
+
+    <!-- Completed -->
+    <ng-container *ngIf="response.status === 'Completed'">
+
+      <!-- Summary -->
+      <div class="summary-grid">
+        <div class="stat-card on-time">
+          <div class="stat-value">{{ response.summary.onTime }}</div>
+          <div class="stat-label">On Time</div>
+        </div>
+        <div class="stat-card delayed">
+          <div class="stat-value">{{ response.summary.delayed }}</div>
+          <div class="stat-label">Delayed</div>
+        </div>
+        <div class="stat-card indeterminate">
+          <div class="stat-value">{{ response.summary.indeterminate }}</div>
+          <div class="stat-label">Indeterminate</div>
+        </div>
+      </div>
+
+      <!-- Results table -->
+      <div class="section-card">
+        <div class="section-header">
+          <h4>Results</h4>
+          <span class="count-badge">{{ response.results.length }}</span>
+        </div>
+
+        <table class="results-table" *ngIf="response.results.length > 0; else noResults">
+          <thead>
+            <tr>
+              <th>Study Code</th>
+              <th>Customer</th>
+              <th>Planned</th>
+              <th>Actual</th>
+              <th>Classification</th>
+              <th>Reason</th>
+              <th>Flags</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let r of response.results">
+              <td><strong>{{ r.studyCode }}</strong></td>
+              <td>{{ r.customer }}</td>
+              <td>{{ r.plannedCompletionDate ? (r.plannedCompletionDate | date:'MMM d, yyyy') : '—' }}</td>
+              <td>{{ r.actualCompletionDate  ? (r.actualCompletionDate  | date:'MMM d, yyyy') : '—' }}</td>
+              <td>
+                <span class="badge-classification"
+                  [ngClass]="{
+                    'on-time':       r.classification === 'On Time',
+                    'delayed':       r.classification === 'Delayed',
+                    'indeterminate': r.classification === 'Indeterminate'
+                  }">{{ r.classification }}</span>
+              </td>
+              <td>{{ r.reason }}</td>
+              <td>
+                <span class="flag-chip" *ngFor="let f of r.dataQualityFlags">{{ f }}</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <ng-template #noResults>
+          <div class="empty-state">No results match the current filter.</div>
+        </ng-template>
+      </div>
+
+      <!-- Generated plan -->
+      <div class="section-card" *ngIf="response.markdownPlan">
+        <div class="section-header"><h4>Generated Plan</h4></div>
+        <pre class="plan-pre">{{ response.markdownPlan }}</pre>
+      </div>
+
+      <!-- JSON execution plan (collapsible) -->
+      <div class="section-card">
+        <details class="json-details">
+          <summary>JSON Execution Plan</summary>
+          <pre class="plan-pre">{{ response.jsonPlan | json }}</pre>
+        </details>
+      </div>
+
+    </ng-container>
   </ng-container>
-  <ng-template #completedBlock>
-    <h4>Summary</h4>
-    <p>On Time: {{response.summary.onTime}} | Delayed: {{response.summary.delayed}} | Indeterminate: {{response.summary.indeterminate}}</p>
-    <h4>Results</h4>
-    <pre>{{ response.results | json }}</pre>
-    <h4>Generated Plan</h4>
-    <pre>{{ response.markdownPlan }}</pre>
-    <h4>JSON Execution Plan</h4>
-    <pre>{{ response.jsonPlan | json }}</pre>
-  </ng-template>
+
 </div>

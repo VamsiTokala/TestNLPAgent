@@ -1,6 +1,6 @@
 import { Component } from '@angular/core';
 import { FormBuilder, FormControl, FormGroup, ReactiveFormsModule } from '@angular/forms';
-import { NgFor, NgIf, JsonPipe } from '@angular/common';
+import { NgFor, NgIf, NgClass, JsonPipe, DatePipe } from '@angular/common';
 import { InsightAssistantApiService } from './services/insight-assistant-api.service';
 import { AssistantQueryResponse } from './models/assistant-query-response.model';
 
@@ -8,7 +8,7 @@ import { AssistantQueryResponse } from './models/assistant-query-response.model'
   selector: 'app-insight-assistant',
   templateUrl: './insight-assistant.component.html',
   styleUrls: ['./insight-assistant.component.scss'],
-  imports: [ReactiveFormsModule, NgFor, NgIf, JsonPipe]
+  imports: [ReactiveFormsModule, NgFor, NgIf, NgClass, JsonPipe, DatePipe]
 })
 export class InsightAssistantComponent {
   examples = [

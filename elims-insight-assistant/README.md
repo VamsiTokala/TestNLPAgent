@@ -8,28 +8,38 @@ and returns structured results — without letting an AI freely query databases.
 
 ```
 User types query in Angular UI
+  e.g. "filter studies with classification Indeterminate"
         ↓
-Angular dev server proxies POST /api/assistant/query to .NET backend (port 5000)
+Angular POSTs to /api/assistant/query → .NET backend (port 5000)
         ↓
 Plan Generator — converts natural language to a structured JSON execution plan
-  • Gemini / OpenAI: real NLP understands any phrasing ("overdue trials", "missed deadline")
+  • Gemini / OpenAI: real NLP — understands any phrasing and maps it to
+    output.includeClassifications (e.g. ["Indeterminate"] for the query above)
   • Mock: keyword matching for local dev without an API key
+  • Post-parse check: blank intent or empty operations → UnsupportedQuery (never executed)
         ↓
 Validator — checks the plan against a strict allowlist BEFORE anything runs
+  • Plan completeness: intent, operations, required services, entities all present
   • Only approved services (study-service, corelabs-service) are permitted
-  • Only approved fields, operators, and row limits are allowed
+  • Only approved fields, operators, aggregates, and row limits are allowed
   • Write operations are unconditionally blocked
+  • Filter value injection guard (SQL/script tokens rejected)
         ↓
 Execution Engine — runs the approved plan against demo seed data
-  • Verifies user roles and legal entities
+  • Verifies user roles (StudyViewer + CoreLabsViewer) and legal entities
   • Fetches studies + TestPs, correlates, classifies On Time / Delayed / Indeterminate
+  • Filters results by plan.Output.IncludeClassifications
         ↓
 Audit Service — records every query, who ran it, what plan was used, what it returned
         ↓
-JSON response → Angular UI renders Summary + Results + Plan
+JSON response → Angular UI:
+  • status = "Completed"      → renders Summary cards + Results table + Plan
+  • status = "UnsupportedQuery" → shows reason message only (no empty plan rendered)
+  • HTTP 4xx/5xx              → shows error banner
 ```
 
-The LLM never touches data. It only proposes a plan. The Validator decides whether that plan is safe to run — regardless of what the LLM said.
+The LLM never touches data. It only proposes a plan. The Validator decides whether
+that plan is safe to run — regardless of what the LLM said.
 
 ## Plan Generator Modes
 
@@ -222,3 +232,16 @@ The LLM (Gemini, OpenAI, or none in mock mode) only proposes a JSON plan. Before
 - Write operations are unconditionally blocked
 
 This makes the system safe for regulated environments regardless of what the LLM returns.
+
+## Extending — Adding a New Service Contract
+
+To teach the assistant to query a new downstream service:
+
+1. **Define** the service interface + demo client in `Services/` and seed data in `seed-data/`
+2. **Register** in `Program.cs` DI
+3. **Add to allowlist** in `Validation/PlanValidator.cs`
+4. **Update prompts** in `Services/PlanGenerator.cs` (Gemini, OpenAI, Mock)
+5. **Use in engine** — inject the new client in `Execution/ExecutionEngine.cs`
+
+See `docs/solution-overview.md § Extending the Design` for the full guide with code snippets,
+and `docs/service-contracts.md` for the current contract reference.
