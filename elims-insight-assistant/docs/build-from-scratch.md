@@ -251,7 +251,16 @@ NuGet is the package manager for .NET — like npm for JavaScript. Running
 dotnet add package Swashbuckle.AspNetCore
 ```
 
-**OpenAI SDK** — the official .NET client for calling OpenAI's chat API:
+**Mscc.GenerativeAI** — the .NET client for calling Google Gemini's API (free tier):
+
+```bash
+dotnet add package Mscc.GenerativeAI --version 3.1.0
+```
+
+> This package works with a simple API key from Google AI Studio (free, no billing required).
+> It does **not** use the Vertex AI / Google Cloud SDK, which requires a GCP service account.
+
+**OpenAI SDK** — the official .NET client for calling OpenAI's chat API (optional — only needed if you want to use OpenAI instead of Gemini):
 
 ```bash
 dotnet add package OpenAI --version 2.10.0
@@ -277,6 +286,7 @@ Open `ElimsInsightAssistant.Api.csproj` in VS Code and add the highlighted line:
     <UserSecretsId>elims-insight-assistant-api</UserSecretsId>   ← ADD THIS
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Mscc.GenerativeAI" Version="3.1.0" />
     <PackageReference Include="OpenAI" Version="2.10.0" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.9.0" />
   </ItemGroup>
@@ -289,7 +299,7 @@ The value can be any unique string — the project name works fine. Without this
 Could not find the global property 'UserSecretsId' in MSBuild project
 ```
 
-**Your final `.csproj` should look exactly like the block above** — two package
+**Your final `.csproj` should look exactly like the block above** — three package
 references and the `UserSecretsId` property. Verify it matches before continuing.
 
 ### 3.7 Create the Test Project
@@ -1323,9 +1333,12 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
-// Use OpenAI when an API key is present; fall back to rule-based mock for local dev
+// Priority: Gemini (free tier) → OpenAI → Mock (no key)
+var geminiKey = builder.Configuration["Gemini:ApiKey"];
 var openAiKey = builder.Configuration["OpenAI:ApiKey"];
-if (!string.IsNullOrWhiteSpace(openAiKey))
+if (!string.IsNullOrWhiteSpace(geminiKey))
+    builder.Services.AddSingleton<IPlanGenerator, GeminiPlanGenerator>();
+else if (!string.IsNullOrWhiteSpace(openAiKey))
     builder.Services.AddSingleton<IPlanGenerator, OpenAiPlanGenerator>();
 else
     builder.Services.AddSingleton<IPlanGenerator, MockPlanGenerator>();
@@ -1341,12 +1354,14 @@ var app = builder.Build();
 
 // Log active mode clearly at startup so there is no silent fallback to mock
 var logger = app.Services.GetRequiredService<ILogger<Program>>();
-if (!string.IsNullOrWhiteSpace(openAiKey))
+if (!string.IsNullOrWhiteSpace(geminiKey))
+    logger.LogInformation("Plan generator: GeminiPlanGenerator (gemini-1.5-flash, JSON mode)");
+else if (!string.IsNullOrWhiteSpace(openAiKey))
     logger.LogInformation("Plan generator: OpenAiPlanGenerator (gpt-4o-mini, structured outputs)");
 else
     logger.LogWarning(
         "Plan generator: MockPlanGenerator (keyword matching only — no real NLP). " +
-        "To enable real NL intent extraction set OpenAI:ApiKey. " +
+        "To enable real NL intent extraction set Gemini:ApiKey (free tier) or OpenAI:ApiKey. " +
         "See docs/build-from-scratch.md §14.1 for how to obtain and configure a key.");
 
 app.UseSwagger();
@@ -1356,11 +1371,14 @@ app.Run();
 ```
 
 Also create `appsettings.json` in the API project root (next to `Program.cs`).
-This file provides the `OpenAI:ApiKey` config key — left empty so the app starts
+This file provides empty placeholders for API keys — left empty so the app starts
 in mock mode by default. Never put your real key here:
 
 ```json
 {
+  "Gemini": {
+    "ApiKey": ""
+  },
   "OpenAI": {
     "ApiKey": ""
   }
@@ -2034,39 +2052,39 @@ Any file change triggers an instant rebuild without restarting the server.
 
 ---
 
-## Part 14 — Configure OpenAI and Run Everything
+## Part 14 — Configure an API Key and Run Everything
 
-### Step 14.1 — Get an OpenAI API Key
+### Step 14.1 — Get an API Key (free option recommended)
 
 > **Skip this step if you just want to run the demo in mock mode.**
 > Mock mode works without any account — jump straight to Step 14.2.
 
-To enable real NL intent extraction (queries like "which studies missed their deadline?"):
+To enable real NL intent extraction (queries like "which studies missed their deadline?")
+you need an API key for an LLM provider. **Gemini is recommended** — it has a free tier
+with hundreds of queries per day, no billing required.
 
-**1. Create an OpenAI account**
-Go to https://platform.openai.com and click **Sign up**.
-Use a Google/Microsoft account or create one with your email.
+---
 
-**2. Add billing (required to use the API)**
-Go to https://platform.openai.com/settings/organization/billing
-Click **Add payment method** and add a card.
-You only pay for what you use. `gpt-4o-mini` costs roughly **$0.15 per 1 million input tokens**.
-A single query uses ~300 tokens — so $5 of credit lasts thousands of queries.
+#### Option A — Google Gemini (recommended — free tier, no billing required)
+
+**1. Create a Google account** (skip if you have Gmail)
+
+**2. Go to Google AI Studio**
+Go to https://aistudio.google.com and sign in with your Google account.
 
 **3. Create your API key**
-Go to https://platform.openai.com/api-keys
-Click **Create new secret key** → give it a name (e.g. "elims-dev") → click **Create**.
-Copy the key immediately — it starts with `sk-proj-...` and is only shown once.
+Click **Get API key** → **Create API key** → choose a project or create a new one.
+Copy the key — it starts with `AIza...`.
 
-> **Never commit your API key to git.** Anyone with your key can use your billing account.
+> **Never commit your API key to git.** Anyone with your key can send requests on your behalf.
 > The methods below keep the key out of your code.
 
 **4. Add the key to the project — two options:**
 
-**Option A — User Secrets (recommended: key never touches any file)**
+**Option A1 — User Secrets (recommended: key never touches any file)**
 ```bash
 cd elims-insight-assistant/backend/src/ElimsInsightAssistant.Api
-dotnet user-secrets set "OpenAI:ApiKey" "sk-proj-..."
+dotnet user-secrets set "Gemini:ApiKey" "AIza..."
 ```
 The key is stored in your OS user profile, not in the project folder.
 It is never included when you share or push the code.
@@ -2081,37 +2099,70 @@ It is never included when you share or push the code.
 > The value can be any unique string — a project name works fine. Save the file
 > then re-run `dotnet user-secrets set`.
 
-**Option B — Environment variable**
+**Option A2 — Environment variable**
 ```bash
 # Mac / Linux
-export OpenAI__ApiKey=sk-proj-...
+export Gemini__ApiKey=AIza...
 
 # Windows Command Prompt
-set OpenAI__ApiKey=sk-proj-...
+set Gemini__ApiKey=AIza...
 ```
-> Note the double underscore `__` — that is how .NET maps nested config (`OpenAI:ApiKey`) to env vars.
+> Note the double underscore `__` — that is how .NET maps nested config (`Gemini:ApiKey`) to env vars.
+
+---
+
+#### Option B — OpenAI (requires billing — ~$0.15 per million tokens)
+
+**1. Create an OpenAI account**
+Go to https://platform.openai.com and click **Sign up**.
+
+**2. Add billing**
+Go to https://platform.openai.com/settings/organization/billing
+Click **Add payment method** and add a card.
+`gpt-4o-mini` costs roughly **$0.15 per 1 million input tokens**.
+A single query uses ~300 tokens — so $5 of credit lasts thousands of queries.
+
+**3. Create your API key**
+Go to https://platform.openai.com/api-keys
+Click **Create new secret key** → give it a name → click **Create**.
+Copy the key — it starts with `sk-proj-...` and is only shown once.
+
+**4. Add the key:**
+```bash
+dotnet user-secrets set "OpenAI:ApiKey" "sk-proj-..."
+# Or env var:
+export OpenAI__ApiKey=sk-proj-...
+```
+
+---
 
 **How the app tells you which mode is active:**
 Every time the API starts, it logs one line before anything else:
 ```
-# With a key:
+# With a Gemini key:
+info: Plan generator: GeminiPlanGenerator (gemini-1.5-flash, JSON mode)
+
+# With an OpenAI key (and no Gemini key):
 info: Plan generator: OpenAiPlanGenerator (gpt-4o-mini, structured outputs)
 
-# Without a key:
+# Without any key:
 warn: Plan generator: MockPlanGenerator (keyword matching only — no real NLP).
-      To enable real NL intent extraction set OpenAI:ApiKey.
+      To enable real NL intent extraction set Gemini:ApiKey (free tier) or OpenAI:ApiKey.
       See docs/build-from-scratch.md §14.1 for how to obtain and configure a key.
 ```
 If you see the `warn` line, you are in mock mode. The warning is intentional — there is no silent fallback.
 
-**How the app chooses which generator to use:**
+**How the app chooses which generator to use (priority order):**
 ```
-OpenAI:ApiKey present and non-empty?
-  YES → OpenAiPlanGenerator  (real NLP via gpt-4o-mini, strict JSON schema)
-  NO  → MockPlanGenerator    (keyword matching, no API call, no cost)
+Gemini:ApiKey present and non-empty?
+  YES → GeminiPlanGenerator  (real NLP via gemini-1.5-flash, JSON mode, free tier)
+  NO  →
+    OpenAI:ApiKey present and non-empty?
+      YES → OpenAiPlanGenerator  (real NLP via gpt-4o-mini, strict JSON schema)
+      NO  → MockPlanGenerator    (keyword matching, no API call, no cost)
 ```
 
-With `OpenAiPlanGenerator` active, queries like these all work even though
+With a real LLM generator active, queries like these all work even though
 they were never hardcoded:
 - *"Which studies missed their deadline?"*
 - *"Show me overdue trials"*
@@ -2164,19 +2215,27 @@ Starts the API web server:
 dotnet run --urls http://localhost:5000
 ```
 
-Expected startup output:
+Expected startup output (mock mode — no key set):
 ```
 warn: Program[0]
       Plan generator: MockPlanGenerator (keyword matching only — no real NLP).
-      To enable real NL intent extraction set OpenAI:ApiKey.
+      To enable real NL intent extraction set Gemini:ApiKey (free tier) or OpenAI:ApiKey.
 info: Microsoft.Hosting.Lifetime[14]
       Now listening on: http://localhost:5000
 info: Microsoft.Hosting.Lifetime[0]
       Application started. Press Ctrl+C to shut down.
 ```
 
+Expected startup output (Gemini key set):
+```
+info: Program[0]
+      Plan generator: GeminiPlanGenerator (gemini-1.5-flash, JSON mode)
+info: Microsoft.Hosting.Lifetime[14]
+      Now listening on: http://localhost:5000
+```
+
 > The `warn` line on startup is intentional — it tells you the app is in mock mode.
-> It is not an error. See Step 14.1 to enable real NLP with an OpenAI key.
+> It is not an error. See Step 14.1 to enable real NLP with a Gemini key (free) or OpenAI key.
 
 **Step D — Verify the backend is working**
 
@@ -2288,23 +2347,24 @@ run against the code directly in-process.
 
 ---
 
-## Part 15 — Testing Both Modes and Switching Providers
+## Part 15 — Testing All Three Modes and Switching Providers
 
-### 15.1 — How the two modes differ
+### 15.1 — How the three modes differ
 
-| | Mock mode (no key) | Real mode (OpenAI key set) |
-|---|---|---|
-| **How it works** | Keyword matching in code | GPT-4o-mini generates a structured JSON plan |
-| **Startup log** | `warn: MockPlanGenerator` | `info: OpenAiPlanGenerator` |
-| **Cost** | Free — no API call made | ~$0.15 per million tokens (~300 tokens per query) |
-| **Queries that work** | Only the 4 hardcoded phrases | Any natural language query |
-| **Response time** | ~5 ms | ~1–3 seconds |
-| **Fails with** | Unrecognised query → `UnsupportedQuery` | Bad key → 503; no credits → 429 |
-| **Good for** | Local dev, CI, demos | Real NLP testing, production |
+| | Mock mode (no key) | Gemini mode (recommended) | OpenAI mode |
+|---|---|---|---|
+| **How it works** | Keyword matching in code | gemini-1.5-flash generates a JSON plan | gpt-4o-mini generates a JSON plan |
+| **Startup log** | `warn: MockPlanGenerator` | `info: GeminiPlanGenerator` | `info: OpenAiPlanGenerator` |
+| **Cost** | Free — no API call | Free tier — hundreds of queries/day | ~$0.15 per million tokens |
+| **Billing required** | No | No — Google AI Studio key only | Yes — card required |
+| **Queries that work** | Only the 4 hardcoded phrases | Any natural language query | Any natural language query |
+| **Response time** | ~5 ms | ~1–2 seconds | ~1–3 seconds |
+| **Fails with** | Unrecognised query → `UnsupportedQuery` | Bad key → 503; quota hit → 503 | Bad key → 503; no credits → 429 |
+| **Good for** | CI, unit tests | Hackathons, development, demos | Production, OpenAI ecosystem |
 
 ### 15.2 — How to test mock mode
 
-Mock mode requires no key — just make sure no `OpenAI:ApiKey` is set:
+Mock mode requires no key — just make sure neither `Gemini:ApiKey` nor `OpenAI:ApiKey` is set:
 
 ```bash
 # Confirm no key is stored in User Secrets
@@ -2312,9 +2372,10 @@ cd elims-insight-assistant/backend/src/ElimsInsightAssistant.Api
 dotnet user-secrets list
 ```
 
-If the key appears, remove it:
+If a key appears, remove it:
 
 ```bash
+dotnet user-secrets remove "Gemini:ApiKey"
 dotnet user-secrets remove "OpenAI:ApiKey"
 ```
 
@@ -2343,18 +2404,18 @@ Invoke-RestMethod -Uri http://localhost:5000/api/assistant/query `
 
 Expected response: `"status": "UnsupportedQuery"` — not a crash, not a 500.
 
-### 15.3 — How to test real (OpenAI) mode
+### 15.3 — How to test real (Gemini) mode
 
 Set the key, restart, confirm the `info` line appears:
 
 ```bash
-dotnet user-secrets set "OpenAI:ApiKey" "sk-proj-..."
+dotnet user-secrets set "Gemini:ApiKey" "AIza..."
 dotnet run --urls http://localhost:5000
 ```
 
 Expected startup:
 ```
-info: Plan generator: OpenAiPlanGenerator (gpt-4o-mini, structured outputs)
+info: Plan generator: GeminiPlanGenerator (gemini-1.5-flash, JSON mode)
 ```
 
 **Test with free-text queries that mock mode cannot handle:**
@@ -2373,32 +2434,40 @@ extracts the intent and maps it to the same execution plan structure.
 
 Set an invalid key to force an auth failure:
 ```bash
-dotnet user-secrets set "OpenAI:ApiKey" "sk-invalid"
+dotnet user-secrets set "Gemini:ApiKey" "AIza-invalid"
 dotnet run --urls http://localhost:5000
 ```
 
 Send any query — you should get HTTP 503:
 ```json
-{ "status": "ServiceUnavailable", "message": "Plan generation service is temporarily unavailable. Please try again." }
+{ "status": "ServiceUnavailable", "message": "Plan generation service is temporarily unavailable." }
 ```
 
-The full error (401 from OpenAI) is in the server terminal, not in the response.
+The full error is in the server terminal, not in the response — raw exception details
+are never sent to clients.
 Reset to your real key or remove it to restore normal operation.
 
 ### 15.4 — How to switch between modes at runtime
 
-You do not need to change any code or rebuild. Just set or remove the secret and restart:
+You do not need to change any code or rebuild. Just set or remove secrets and restart:
 
 ```bash
-# Switch TO real mode
+# Switch TO Gemini mode (free tier)
+dotnet user-secrets set "Gemini:ApiKey" "AIza..."
+
+# Switch TO OpenAI mode
 dotnet user-secrets set "OpenAI:ApiKey" "sk-proj-..."
 
-# Switch TO mock mode
+# Switch TO mock mode (remove all keys)
+dotnet user-secrets remove "Gemini:ApiKey"
 dotnet user-secrets remove "OpenAI:ApiKey"
 
 # Then restart the backend — mode is chosen once at startup
 dotnet run --urls http://localhost:5000
 ```
+
+**Priority order:** Gemini key → OpenAI key → Mock. If both Gemini and OpenAI keys
+are present, Gemini is used. Remove the Gemini key to use OpenAI.
 
 The startup log always tells you which mode is active — there is no silent fallback.
 
@@ -2423,15 +2492,18 @@ public interface IPlanGenerator {
    ```
 
 2. Create a new class `AnthropicPlanGenerator : IPlanGenerator` in `PlanGenerator.cs`
-   using the same structure as `OpenAiPlanGenerator` — prompt, parse JSON, return
+   using the same structure as `GeminiPlanGenerator` — prompt, parse JSON, return
    `PlanGeneratorResult`.
 
 3. Update `Program.cs` to check for an Anthropic key and register accordingly:
    ```csharp
-   var anthropicKey = builder.Configuration["Anthropic:ApiKey"];
+   var geminiKey    = builder.Configuration["Gemini:ApiKey"];
    var openAiKey    = builder.Configuration["OpenAI:ApiKey"];
+   var anthropicKey = builder.Configuration["Anthropic:ApiKey"];
 
-   if (!string.IsNullOrWhiteSpace(openAiKey))
+   if (!string.IsNullOrWhiteSpace(geminiKey))
+       builder.Services.AddSingleton<IPlanGenerator, GeminiPlanGenerator>();
+   else if (!string.IsNullOrWhiteSpace(openAiKey))
        builder.Services.AddSingleton<IPlanGenerator, OpenAiPlanGenerator>();
    else if (!string.IsNullOrWhiteSpace(anthropicKey))
        builder.Services.AddSingleton<IPlanGenerator, AnthropicPlanGenerator>();
@@ -2449,14 +2521,14 @@ they only know about `IPlanGenerator`, not which provider is behind it.
 
 **Provider comparison for this use case:**
 
-| Provider | Model to use | Structured outputs | Free tier |
-|---|---|---|---|
-| OpenAI (current) | gpt-4o-mini | `CreateJsonSchemaFormat` (strict) | No — $5 min |
-| Anthropic Claude | claude-haiku-4-5 | Tool use / JSON mode | No — $5 min |
-| Google Gemini | gemini-2.0-flash | Response schema | Yes — free tier available |
+| Provider | Model | Structured outputs | Free tier | Key format |
+|---|---|---|---|---|
+| Google Gemini (default) | gemini-1.5-flash | JSON mode (`ResponseMimeType`) | Yes — hundreds/day | `AIza...` |
+| OpenAI | gpt-4o-mini | `CreateJsonSchemaFormat` (strict) | No — billing required | `sk-proj-...` |
+| Anthropic Claude | claude-haiku-4-5 | Tool use / JSON mode | No — billing required | `sk-ant-...` |
 
-Gemini is worth considering if you want a free API for development — the free tier
-handles hundreds of queries per day at no cost.
+> **Hackathon / development recommendation:** Use Gemini free tier.
+> No billing, no credit card, hundreds of free queries per day from Google AI Studio.
 
 ---
 
@@ -2622,9 +2694,10 @@ Component binds response to template
 | **OpenAI ChatClient** | Send a prompt, get a structured response | OpenAiPlanGenerator |
 | **Structured Outputs** | Schema-constrained JSON enforced by provider, not just prompted | `CreateJsonSchemaFormat` |
 | **`IsServerError` flag** | Distinguish retryable failures from unsupported queries | PlanGeneratorResult |
-| **Log server-side, generic to client** | Never return raw exception text to API consumers | OpenAiPlanGenerator catch blocks |
-| **User Secrets** | Store API keys locally without committing them to git | OpenAI:ApiKey config |
-| **Feature Flag via Config** | Switch implementations at startup based on config | Program.cs key check |
+| **Log server-side, generic to client** | Never return raw exception text to API consumers | GeminiPlanGenerator / OpenAiPlanGenerator catch blocks |
+| **User Secrets** | Store API keys locally without committing them to git | Gemini:ApiKey / OpenAI:ApiKey config |
+| **Feature Flag via Config** | Switch implementations at startup based on config | Program.cs key priority check |
+| **Free tier LLM** | Google Gemini free tier (Google AI Studio key, no billing) | GeminiPlanGenerator |
 
 ---
 
@@ -2690,8 +2763,8 @@ get queryControl(): FormControl { return this.form.get('query') as FormControl; 
 Then use `[formControl]="queryControl"` in the template.
 
 **API returns HTTP 503 "Plan generation service is temporarily unavailable"**
-This is a transient OpenAI failure (network, provider outage, invalid API key).
-Check: API key is correct → has credits → internet is reachable.
+This is a transient LLM provider failure (network, provider outage, invalid API key, quota exceeded).
+Check: API key is correct → quota/credits available → internet is reachable.
 This is intentional — 503 tells clients to retry, unlike 200 UnsupportedQuery which they should not retry.
 Full error details are in the server log (`dotnet run` terminal output), not in the HTTP response.
 
@@ -2699,9 +2772,9 @@ Full error details are in the server log (`dotnet run` terminal output), not in 
 This is by design — raw exception messages are never sent to clients (security + stable contracts).
 Look at the terminal where `dotnet run` is running to see the full exception.
 
-**"OpenAI:ApiKey is not configured" at startup**
-This only happens if `OpenAiPlanGenerator` is registered but the key is missing.
-The app normally falls back to `MockPlanGenerator` when the key is empty.
+**"Gemini:ApiKey is not configured" or "OpenAI:ApiKey is not configured" at startup**
+This only happens if the corresponding generator is registered but the key is missing.
+The app normally falls back to `MockPlanGenerator` when both keys are empty.
 Check `Program.cs` — the key check uses `string.IsNullOrWhiteSpace`.
 
 **`Could not find the global property 'UserSecretsId'` when running `dotnet user-secrets set`**
@@ -2714,5 +2787,5 @@ Save the `.csproj` then re-run `dotnet user-secrets set`.
 ---
 
 *This document covers the complete implementation of eLIMS Insight Assistant.
-Every decision — from folder layout to OpenAI JSON mode — exists for a reason.
+Every decision — from folder layout to Gemini JSON mode — exists for a reason.
 Understanding the why makes the what memorable.*
