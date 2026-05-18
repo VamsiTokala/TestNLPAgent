@@ -4,7 +4,7 @@ namespace ElimsInsightAssistant.Tests;
 
 public class ApiContractTests
 {
-    private readonly MockPlanGenerator _generator = new();
+    private readonly MockPlanGenerator _generator = new(new InMemoryServiceRegistry());
 
     [Fact]
     public async Task MockGenerator_ReturnsPlan_ForSupportedQuery()

@@ -8,6 +8,7 @@ public record AssistantQueryResponse
     public string PlanId { get; init; } = string.Empty;
     public string TraceId { get; init; } = string.Empty;
     public string Status { get; init; } = "Completed";
+    public string PlanGeneratorMode { get; init; } = string.Empty;
     public string MarkdownPlan { get; init; } = string.Empty;
     public ExecutionPlan JsonPlan { get; init; } = new();
     public ValidationResult Validation { get; init; } = new();
@@ -38,7 +39,7 @@ public record ExecutionPlan
     public PlanLimits Limits { get; init; } = new(500, true);
 }
 
-public record PlanOperation(string Service, string Action, List<string> Select, List<PlanFilter> Filters);
+public record PlanOperation(string Service, string Action, List<string> Select, List<PlanFilter> Filters, string? Reason = null);
 public record PlanFilter(string Field, string Op, string? Value);
 public record PlanCorrelate(string LeftEntity = "study", string RightEntity = "testp", string LeftField = "studyId", string RightField = "studyId");
 public record PlanTransform(List<string>? GroupBy = null, List<PlanAggregate>? Aggregates = null)

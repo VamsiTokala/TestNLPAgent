@@ -13,8 +13,29 @@ public class AssistantController(
     IPlanGenerator planGenerator,
     IPlanValidator validator,
     IExecutionEngine executionEngine,
-    IAuditService auditService) : ControllerBase
+    IAuditService auditService,
+    IServiceRegistry serviceRegistry) : ControllerBase
 {
+    [HttpGet("contracts")]
+    public IActionResult GetContracts() => Ok(serviceRegistry.GetAll());
+
+    [HttpPost("contracts")]
+    public IActionResult RegisterContract([FromBody] ServiceContractEntry entry)
+    {
+        if (string.IsNullOrWhiteSpace(entry.Name))
+            return BadRequest("Name is required.");
+        if (string.IsNullOrWhiteSpace(entry.Action))
+            return BadRequest("Action is required.");
+        if (entry.Fields == null || entry.Fields.Count == 0)
+            return BadRequest("At least one field is required.");
+        if (string.IsNullOrWhiteSpace(entry.Purpose))
+            return BadRequest("Purpose is required (used in AI prompt).");
+
+        serviceRegistry.Register(entry);
+        return Ok(serviceRegistry.GetAll());
+    }
+
+
     [HttpPost("query")]
     public async Task<ActionResult<AssistantQueryResponse>> Query([FromBody] NaturalLanguageQueryRequest request)
     {
@@ -26,7 +47,7 @@ public class AssistantController(
 
         // Genuinely unsupported query → 200 with status flag (not an error, just out of scope)
         if (result.Plan is null)
-            return Ok(new AssistantQueryResponse { Status = "UnsupportedQuery", Message = result.Error ?? "Unsupported query" });
+            return Ok(new AssistantQueryResponse { Status = "UnsupportedQuery", PlanGeneratorMode = planGenerator.ProviderName, Message = result.Error ?? "Unsupported query" });
 
         var validation = validator.Validate(result.Plan);
         validation = validation with { Checks = [.. validation.Checks, new("User authorization", "Passed")] };
@@ -41,13 +62,14 @@ public class AssistantController(
 
         var response = new AssistantQueryResponse
         {
-            PlanId       = planId,
-            TraceId      = traceId,
-            MarkdownPlan = result.Markdown,
-            JsonPlan     = result.Plan,
-            Validation   = validation,
-            Summary      = summary,
-            Results      = rows
+            PlanId             = planId,
+            TraceId            = traceId,
+            PlanGeneratorMode  = planGenerator.ProviderName,
+            MarkdownPlan       = result.Markdown,
+            JsonPlan           = result.Plan,
+            Validation         = validation,
+            Summary            = summary,
+            Results            = rows
         };
 
         auditService.Save(new AuditRecord

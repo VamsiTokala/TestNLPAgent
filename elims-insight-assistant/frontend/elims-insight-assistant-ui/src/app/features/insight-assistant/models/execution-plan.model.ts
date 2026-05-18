@@ -9,6 +9,7 @@ export interface PlanOperation {
   action: string;
   select: string[];
   filters: PlanFilter[];
+  reason: string | null;
 }
 
 export interface PlanLimits {
@@ -16,10 +17,15 @@ export interface PlanLimits {
   pagination: boolean;
 }
 
+export interface PlanOutput {
+  includeClassifications: string[];
+}
+
 export interface ExecutionPlan {
   version: string;
   intent: string;
   entities: string[];
   operations: PlanOperation[];
+  output: PlanOutput;
   limits: PlanLimits;
 }

@@ -8,28 +8,38 @@ and returns structured results — without letting an AI freely query databases.
 
 ```
 User types query in Angular UI
+  e.g. "filter studies with classification Indeterminate"
         ↓
-Angular dev server proxies POST /api/assistant/query to .NET backend (port 5000)
+Angular POSTs to /api/assistant/query → .NET backend (port 5000)
         ↓
 Plan Generator — converts natural language to a structured JSON execution plan
-  • Gemini / OpenAI: real NLP understands any phrasing ("overdue trials", "missed deadline")
+  • Gemini / OpenAI: real NLP — understands any phrasing and maps it to
+    output.includeClassifications (e.g. ["Indeterminate"] for the query above)
   • Mock: keyword matching for local dev without an API key
+  • Post-parse check: blank intent or empty operations → UnsupportedQuery (never executed)
         ↓
 Validator — checks the plan against a strict allowlist BEFORE anything runs
+  • Plan completeness: intent, operations, required services, entities all present
   • Only approved services (study-service, corelabs-service) are permitted
-  • Only approved fields, operators, and row limits are allowed
+  • Only approved fields, operators, aggregates, and row limits are allowed
   • Write operations are unconditionally blocked
+  • Filter value injection guard (SQL/script tokens rejected)
         ↓
 Execution Engine — runs the approved plan against demo seed data
-  • Verifies user roles and legal entities
+  • Verifies user roles (StudyViewer + CoreLabsViewer) and legal entities
   • Fetches studies + TestPs, correlates, classifies On Time / Delayed / Indeterminate
+  • Filters results by plan.Output.IncludeClassifications
         ↓
 Audit Service — records every query, who ran it, what plan was used, what it returned
         ↓
-JSON response → Angular UI renders Summary + Results + Plan
+JSON response → Angular UI:
+  • status = "Completed"      → renders Summary cards + Results table + Plan
+  • status = "UnsupportedQuery" → shows reason message only (no empty plan rendered)
+  • HTTP 4xx/5xx              → shows error banner
 ```
 
-The LLM never touches data. It only proposes a plan. The Validator decides whether that plan is safe to run — regardless of what the LLM said.
+The LLM never touches data. It only proposes a plan. The Validator decides whether
+that plan is safe to run — regardless of what the LLM said.
 
 ## Plan Generator Modes
 
@@ -136,48 +146,40 @@ Expected: ST-002 (Delayed, 2 days late) and ST-004 (Indeterminate, missing data)
 
 Open `http://localhost:4200` after starting both backend and frontend.
 
-**Initial state** — input pre-filled, four example buttons:
-```
-eLIMS Insight Assistant
-Governed Natural-Language Analytics
+**Service Catalogue** (top of page) — shows every registered service contract as a card.
+After a query runs, cards light up with "✓ Selected" or dim to show which services the AI picked.
 
-Ask eLIMS  [Find studies not completed on time      ] [Run Query]
+**Query bar** — pre-filled with an example query; four quick-pick buttons below.
 
-[Find studies not completed on time] [Show delayed studies]
-[Show indeterminate studies] [Show completed late studies]
-```
+**AI Interpretation panel** (appears after Run Query):
+- **Provider badge** — which generator was used (Gemini 2.5 Flash / GPT-4o Mini / Mock)
+- **Intent Detected** — the `intent` string extracted from the query
+- **Classification Filter** — all three classifications (On Time / Delayed / Indeterminate) shown as "included" or "excluded" based on what the AI chose
+- **Service Contract Selection** — pipeline cards for each selected service with the AI's per-operation reason
+- **Validation** — pass/fail pill for every validator check
 
-**After clicking Run Query** — four sections appear below:
-```
-── Summary ──────────────────────────────────────
-On Time: 2 | Delayed: 1 | Indeterminate: 1
+**Summary cards** — On Time / Delayed / Indeterminate counts across all studies.
 
-── Results ──────────────────────────────────────
-ST-002 (XYZ Labs)  → Delayed        2 days after planned date
-ST-004 (Delta Bio) → Indeterminate  Missing planned/actual dates
+**Results table** — rows matching the classification filter.
 
-── Generated Plan ───────────────────────────────
-# Analysis Plan
-Intent: Find studies not completed on time.
-Steps: Fetch studies → Fetch TestPs → Correlate → Classify → Return
-
-── JSON Execution Plan ──────────────────────────
-{ "version": "1.0", "intent": "find_studies_not_completed_on_time", ... }
-```
-
-See `docs/build-from-scratch.md §Part 15` for annotated screen-by-screen walkthrough.
+**Register a new contract** — click **+ Register Contract**, fill in the form, and the AI immediately considers it on the next query (no restart needed).
 
 ## API Endpoints
 
 | Method | Endpoint | Description |
 |---|---|---|
-| POST | `/api/assistant/query` | Full pipeline: generate → validate → execute → audit |
-| POST | `/api/assistant/plan` | Generate plan only, no execution |
-| POST | `/api/assistant/plan/validate` | Validate a plan without executing |
-| POST | `/api/assistant/execute` | Execute a pre-built validated plan |
-| GET | `/api/assistant/audit/{traceId}` | Retrieve audit record by trace ID |
-| GET | `/api/demo/studies` | View seed study data |
-| GET | `/api/demo/corelabs/testps` | View seed TestP data |
+| `GET` | `/api/assistant/contracts` | List all registered service contracts |
+| `POST` | `/api/assistant/contracts` | Register a new service contract |
+| `POST` | `/api/assistant/query` | Full pipeline: generate → validate → execute → audit |
+| `POST` | `/api/assistant/plan` | Generate plan only, no execution |
+| `POST` | `/api/assistant/plan/validate` | Validate a plan without executing |
+| `POST` | `/api/assistant/execute` | Execute a pre-built validated plan |
+| `GET` | `/api/assistant/audit/{traceId}` | Retrieve audit record by trace ID |
+| `GET` | `/api/demo/studies` | View seed study data |
+| `GET` | `/api/demo/corelabs/testps` | View seed TestP data |
+
+Swagger UI: `http://localhost:5000/swagger`
+OpenAPI spec: `http://localhost:5000/swagger/v1/swagger.json`
 
 ## Error Handling
 
@@ -197,7 +199,7 @@ elims-insight-assistant/
 ├── backend/src/
 │   ├── ElimsInsightAssistant.Api/
 │   │   ├── Controllers/     HTTP entry points
-│   │   ├── Services/        Plan generation (Gemini, OpenAI, Mock), classification, data clients
+│   │   ├── Services/        Plan generation (Gemini, OpenAI, Mock), service registry, classification, data clients
 │   │   ├── Validation/      Allowlist validator
 │   │   ├── Execution/       Execution engine
 │   │   ├── Audit/           In-memory audit store
@@ -222,3 +224,34 @@ The LLM (Gemini, OpenAI, or none in mock mode) only proposes a JSON plan. Before
 - Write operations are unconditionally blocked
 
 This makes the system safe for regulated environments regardless of what the LLM returns.
+
+## Extending — Adding a New Service Contract
+
+### Option A: Via the UI (zero code changes)
+
+Click **+ Register Contract** in the Service Catalogue panel and fill in:
+- **Service Name** — identifier used in plans (e.g. `sample-service`)
+- **Action** — the one allowed read action (e.g. `listSamples`)
+- **Fields** — comma-separated allowlisted fields
+- **Purpose for AI** — injected into the prompt; tells the LLM why to use this service
+
+The contract is live immediately. The AI prompt, validator allowlist, and UI catalogue all update automatically.
+
+> Contracts registered at runtime are process-local (`InMemoryServiceRegistry`). Seed them in code for persistence across restarts.
+
+### Option B: In code (persisted across restarts)
+
+Seed the entry in `InMemoryServiceRegistry` and add an `ExecutionEngine` client.
+See `docs/solution-overview.md § Extending the Design — Option B` for the full guide.
+
+**Files to touch:**
+
+| File | Change |
+|---|---|
+| `Services/ServiceRegistry.cs` | Seed entry in constructor |
+| `Services/NewDataServices.cs` | Interface + demo client + DTO |
+| `seed-data/<service>.json` | Seed data |
+| `Program.cs` | DI registration |
+| `Execution/ExecutionEngine.cs` | Inject + call in `ExecuteAsync` |
+
+No changes to `PlanGenerator.cs`, `PlanValidator.cs`, or any frontend file.
