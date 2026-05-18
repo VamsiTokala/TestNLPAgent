@@ -16,7 +16,8 @@ Every query is validated against an allowlist before anything runs. Every query 
 
 | Mode | Activated when | Behaviour |
 |---|---|---|
-| **OpenAI** (`gpt-4o-mini`) | `OpenAI:ApiKey` is configured | Real NL intent extraction — understands paraphrases like "overdue trials", "missed deadline" |
+| **Gemini** (`gemini-1.5-flash`) | `Gemini:ApiKey` is configured (recommended — free tier) | Real NL intent extraction — understands paraphrases like "overdue trials", "missed deadline" |
+| **OpenAI** (`gpt-4o-mini`) | `OpenAI:ApiKey` is configured (no Gemini key) | Real NL intent extraction with strict JSON schema |
 | **Mock** (keyword match) | No API key (default) | Matches hardcoded phrases — suitable for local dev and tests without an API key |
 
 ## Quick Start
@@ -28,32 +29,41 @@ dotnet run --urls http://localhost:5000
 ```
 Swagger UI: http://localhost:5000/swagger
 
-### 2. Add OpenAI Key (optional — skip for mock mode)
+### 2. Add an API Key (optional — skip for mock mode)
 
 Without a key the app runs in **mock mode** (keyword matching, no real NLP). You will see:
 ```
 warn: Plan generator: MockPlanGenerator (keyword matching only — no real NLP).
 ```
 
-To enable real NL intent extraction:
-1. Create an account at https://platform.openai.com
-2. Add billing at https://platform.openai.com/settings/organization/billing
-3. Create a key at https://platform.openai.com/api-keys (starts with `sk-proj-...`)
-4. Set the key — never commit it to git:
+To enable real NL intent extraction, choose a provider:
+
+#### Option A — Google Gemini (recommended — free tier, no billing)
+1. Go to https://aistudio.google.com and sign in
+2. Click **Get API key** → **Create API key** (starts with `AIza...`)
+3. Set the key — never commit it to git:
 
 ```bash
 # Recommended: stored in OS user profile, not in the project
-dotnet user-secrets set "OpenAI:ApiKey" "sk-proj-..."
+dotnet user-secrets set "Gemini:ApiKey" "AIza..."
 
 # Or via environment variable (double underscore __ required)
-export OpenAI__ApiKey=sk-proj-...   # Mac/Linux
-set OpenAI__ApiKey=sk-proj-...      # Windows
+export Gemini__ApiKey=AIza...   # Mac/Linux
+set Gemini__ApiKey=AIza...      # Windows
 ```
 
-When the key is set, startup logs:
+When the Gemini key is set, startup logs:
 ```
-info: Plan generator: OpenAiPlanGenerator (gpt-4o-mini, structured outputs)
+info: Plan generator: GeminiPlanGenerator (gemini-1.5-flash, JSON mode)
 ```
+
+#### Option B — OpenAI (requires billing)
+```bash
+dotnet user-secrets set "OpenAI:ApiKey" "sk-proj-..."
+```
+Startup logs: `info: Plan generator: OpenAiPlanGenerator (gpt-4o-mini, structured outputs)`
+
+**Priority:** If both keys are present, Gemini is used. Remove `Gemini:ApiKey` to use OpenAI.
 
 ### 3. Run Tests
 ```bash

@@ -1,6 +1,8 @@
 using System.Text.Json;
 using ElimsInsightAssistant.Api.Models;
 using Microsoft.Extensions.Logging;
+using Mscc.GenerativeAI;
+using Mscc.GenerativeAI.Types;
 using OpenAI.Chat;
 
 namespace ElimsInsightAssistant.Api.Services;
@@ -75,6 +77,128 @@ Read-only, deterministic, approved service contracts only.
         };
 
         return Task.FromResult(new PlanGeneratorResult(markdown, plan, null));
+    }
+}
+
+// ─── Gemini (free tier via Google AI Studio key — hundreds of queries/day) ────
+
+public class GeminiPlanGenerator : IPlanGenerator
+{
+    private readonly GenerativeModel _model;
+    private readonly ILogger<GeminiPlanGenerator> _logger;
+
+    // Gemini does not have OpenAI-style strict schema enforcement, so we embed the
+    // required JSON structure directly in the prompt and use ResponseMimeType=application/json.
+    // The response will be clean JSON; we strip any accidental markdown fences defensively.
+    private const string FullPrompt = """
+You are a governed analytics plan generator for a laboratory information management system (LIMS).
+
+Given a natural language query, decide whether it is asking about study completion timeliness
+(delayed studies, not completed on time, late, overdue, indeterminate completion, missed deadline, etc.).
+
+ALLOWED SERVICES AND FIELDS:
+  study-service    → action: listStudies → fields: studyId, studyCode, customer, legalEntity, plannedCompletionDate
+  corelabs-service → action: listTestPs  → fields: testpId, studyId, status, completedAt, runType, result
+
+ALLOWED FILTER OPERATORS: =, !=, >, >=, <, <=, in, between, is null, is not null
+ALLOWED AGGREGATE FUNCTIONS: max, min, count, sum, avg
+MAX ROWS LIMIT: 500
+
+If the query IS about study completion timeliness:
+  - Set supported = true
+  - Set reason = null
+  - Write a clear markdown plan explaining the steps
+  - Populate plan with version "1.0", intent "find_studies_not_completed_on_time", the two operations, and limits maxRows 500
+
+If the query is NOT about study completion timeliness:
+  - Set supported = false
+  - Set reason to a one-sentence explanation
+  - Set markdown = null and plan = null
+
+Respond ONLY with a JSON object matching this exact structure (no markdown fences, no extra keys):
+{
+  "supported": true|false,
+  "reason": null or "string",
+  "markdown": null or "string",
+  "plan": null or {
+    "version": "1.0",
+    "intent": "find_studies_not_completed_on_time",
+    "entities": ["study","testp"],
+    "operations": [
+      { "service": "study-service", "action": "listStudies", "select": [...], "filters": [] },
+      { "service": "corelabs-service", "action": "listTestPs", "select": [...], "filters": [{"field":"status","op":"=","value":"Completed"}] }
+    ],
+    "limits": { "maxRows": 500, "pagination": false }
+  }
+}
+
+User query: {QUERY}
+""";
+
+    public GeminiPlanGenerator(IConfiguration config, ILogger<GeminiPlanGenerator> logger)
+    {
+        _logger = logger;
+        var apiKey = config["Gemini:ApiKey"]
+            ?? throw new InvalidOperationException(
+                "Gemini:ApiKey is not configured. " +
+                "Set via: dotnet user-secrets set \"Gemini:ApiKey\" \"AIza...\" " +
+                "or env var Gemini__ApiKey");
+
+        var googleAi = new GoogleAI(apiKey: apiKey);
+        _model = googleAi.GenerativeModel(
+            model: "gemini-1.5-flash",
+            generationConfig: new GenerationConfig { ResponseMimeType = "application/json" });
+    }
+
+    public async Task<PlanGeneratorResult> GenerateAsync(string query)
+    {
+        try
+        {
+            var prompt = FullPrompt.Replace("{QUERY}", query);
+            var response = await _model.GenerateContent(prompt);
+            var raw = response.Text ?? string.Empty;
+
+            // Strip accidental markdown fences (defensive — JSON mode should not need this)
+            var json = raw.Trim();
+            if (json.StartsWith("```")) json = json[(json.IndexOf('\n') + 1)..];
+            if (json.EndsWith("```")) json = json[..json.LastIndexOf("```")].TrimEnd();
+
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            if (!root.GetProperty("supported").GetBoolean())
+            {
+                var reason = root.GetProperty("reason").GetString()
+                             ?? "Query not supported by this assistant.";
+                return new PlanGeneratorResult(string.Empty, null, reason);
+            }
+
+            var markdown = root.GetProperty("markdown").GetString() ?? string.Empty;
+            var plan = JsonSerializer.Deserialize<ExecutionPlan>(
+                root.GetProperty("plan").GetRawText(),
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            if (plan is null)
+            {
+                _logger.LogError("Gemini returned supported=true but plan deserialised to null. Raw: {Json}", json);
+                return new PlanGeneratorResult(string.Empty, null,
+                    "Plan generation service returned an unexpected response.", IsServerError: true);
+            }
+
+            return new PlanGeneratorResult(markdown, plan, null);
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogError(ex, "Gemini response failed JSON parse for query: {Query}", query);
+            return new PlanGeneratorResult(string.Empty, null,
+                "Plan generation service returned an unreadable response.", IsServerError: true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Gemini call failed for query: {Query}", query);
+            return new PlanGeneratorResult(string.Empty, null,
+                "Plan generation service is temporarily unavailable.", IsServerError: true);
+        }
     }
 }
 
