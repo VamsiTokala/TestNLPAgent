@@ -302,7 +302,7 @@ Could not find the global property 'UserSecretsId' in MSBuild project
 **Your final `.csproj` should look exactly like the block above** — three package
 references and the `UserSecretsId` property. Verify it matches before continuing.
 
-### 3.7 Create the Test Project
+### 3.6 Create the Test Project
 
 ```bash
 cd ..
@@ -654,10 +654,10 @@ unsafe to execute directly. By first converting it to a structured JSON plan, we
 create a checkpoint where a validator can inspect and reject it before anything runs.
 
 **Why is the interface `async`?**
-The plan generator makes an outbound HTTP call to OpenAI. Any I/O operation must
-be `async` so the server does not freeze while waiting. Even `MockPlanGenerator`
-uses `Task.FromResult(...)` to satisfy the interface — it wraps its synchronous
-result in a completed Task at zero cost.
+The plan generator makes an outbound HTTP call to an LLM provider (Gemini, OpenAI, etc.).
+Any I/O operation must be `async` so the server does not freeze while waiting.
+Even `MockPlanGenerator` uses `Task.FromResult(...)` to satisfy the interface —
+it wraps its synchronous result in a completed Task at zero cost.
 
 **Why `PlanGeneratorResult` instead of a plain tuple?**
 A tuple `(markdown, plan, error)` cannot express *why* the plan is null. There are
@@ -678,6 +678,8 @@ Create `Services/PlanGenerator.cs`:
 using System.Text.Json;
 using ElimsInsightAssistant.Api.Models;
 using Microsoft.Extensions.Logging;
+using Mscc.GenerativeAI;
+using Mscc.GenerativeAI.Types;
 using OpenAI.Chat;
 
 namespace ElimsInsightAssistant.Api.Services;
@@ -736,6 +738,104 @@ Read-only, deterministic, approved service contracts only.
         };
 
         return Task.FromResult(new PlanGeneratorResult(markdown, plan, null));
+    }
+}
+
+// ─── Gemini (free tier via Google AI Studio — recommended for development) ────
+
+public class GeminiPlanGenerator : IPlanGenerator
+{
+    private readonly GenerativeModel _model;
+    private readonly ILogger<GeminiPlanGenerator> _logger;
+
+    // Gemini JSON mode guarantees the response is valid JSON.
+    // The prompt also includes the expected schema so the model knows what to produce.
+    // We still strip accidental markdown fences defensively (rarely needed with JSON mode on).
+    private const string FullPrompt = """
+You are a governed analytics plan generator for a LIMS.
+
+If the query is about study completion timeliness (delayed, overdue, late, missed deadline, etc.):
+  - Set supported = true
+  - Write a markdown plan and populate the JSON plan with intent "find_studies_not_completed_on_time"
+
+If the query is NOT about study completion timeliness:
+  - Set supported = false, reason = one-sentence explanation, markdown = null, plan = null
+
+ALLOWED SERVICES:
+  study-service    → action: listStudies → fields: studyId, studyCode, customer, legalEntity, plannedCompletionDate
+  corelabs-service → action: listTestPs  → fields: testpId, studyId, status, completedAt, runType, result
+
+Respond ONLY with JSON (no markdown fences):
+{
+  "supported": true|false,
+  "reason": null or "string",
+  "markdown": null or "string",
+  "plan": null or { "version":"1.0", "intent":"find_studies_not_completed_on_time", "entities":[...], "operations":[...], "limits":{"maxRows":500,"pagination":false} }
+}
+
+User query: {QUERY}
+""";
+
+    public GeminiPlanGenerator(IConfiguration config, ILogger<GeminiPlanGenerator> logger)
+    {
+        _logger = logger;
+        var apiKey = config["Gemini:ApiKey"]
+            ?? throw new InvalidOperationException(
+                "Gemini:ApiKey is not configured. " +
+                "Set via: dotnet user-secrets set \"Gemini:ApiKey\" \"AIza...\"");
+
+        var googleAi = new GoogleAI(apiKey: apiKey);
+        _model = googleAi.GenerativeModel(
+            model: "gemini-1.5-flash",
+            generationConfig: new GenerationConfig { ResponseMimeType = "application/json" });
+    }
+
+    public async Task<PlanGeneratorResult> GenerateAsync(string query)
+    {
+        try
+        {
+            var prompt = FullPrompt.Replace("{QUERY}", query);
+            var response = await _model.GenerateContent(prompt);
+            var raw = response.Text ?? string.Empty;
+
+            // Strip accidental markdown fences (defensive)
+            var json = raw.Trim();
+            if (json.StartsWith("```")) json = json[(json.IndexOf('\n') + 1)..];
+            if (json.EndsWith("```")) json = json[..json.LastIndexOf("```")].TrimEnd();
+
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            if (!root.GetProperty("supported").GetBoolean())
+                return new PlanGeneratorResult(string.Empty, null,
+                    root.GetProperty("reason").GetString() ?? "Unsupported query.");
+
+            var markdown = root.GetProperty("markdown").GetString() ?? string.Empty;
+            var plan = JsonSerializer.Deserialize<ExecutionPlan>(
+                root.GetProperty("plan").GetRawText(),
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            if (plan is null)
+            {
+                _logger.LogError("Gemini returned supported=true but plan was null. Raw: {Json}", json);
+                return new PlanGeneratorResult(string.Empty, null,
+                    "Plan generation service returned an unexpected response.", IsServerError: true);
+            }
+
+            return new PlanGeneratorResult(markdown, plan, null);
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogError(ex, "Gemini response failed JSON parse for query: {Query}", query);
+            return new PlanGeneratorResult(string.Empty, null,
+                "Plan generation service returned an unreadable response.", IsServerError: true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Gemini call failed for query: {Query}", query);
+            return new PlanGeneratorResult(string.Empty, null,
+                "Plan generation service is temporarily unavailable.", IsServerError: true);
+        }
     }
 }
 
@@ -898,8 +998,10 @@ It costs almost nothing and keeps the interface consistent.
 | Wrong types | Possible | Prevented |
 
 Structured outputs shift the enforcement to the provider level — before the
-response even leaves OpenAI. This means your parsing code handles the happy
+response even leaves the provider. This means your parsing code handles the happy
 path only; the catch blocks are for genuine network/auth failures, not bad shapes.
+Note: Gemini uses JSON mode (`ResponseMimeType = "application/json"`) rather than
+strict schema, so the schema is enforced by the prompt, not by the provider.
 
 **Concept — Never log or return raw `ex.Message` to clients:**
 Exception messages often contain internal details: provider error codes, upstream
@@ -1187,6 +1289,10 @@ public class AssistantController(
             return Ok(new AssistantQueryResponse
                 { Status = "UnsupportedQuery", Message = result.Error ?? "Unsupported query" });
 
+        // result.Plan is guaranteed non-null here — extract for use below
+        var plan     = result.Plan;
+        var markdown = result.Markdown;
+
         // 2. Validate the plan
         var validation = validator.Validate(plan);
         validation = validation with
@@ -1226,11 +1332,14 @@ public class AssistantController(
 
     // POST /api/assistant/plan — generate plan only, do not execute
     [HttpPost("plan")]
-    public ActionResult<object> Plan([FromBody] NaturalLanguageQueryRequest request)
+    public async Task<ActionResult<object>> Plan([FromBody] NaturalLanguageQueryRequest request)
     {
-        var (markdown, plan, error) = planGenerator.Generate(request.Query);
-        if (plan is null) return Ok(new { status = "UnsupportedQuery", message = error });
-        return Ok(new { markdownPlan = markdown, jsonPlan = plan });
+        var result = await planGenerator.GenerateAsync(request.Query);
+        if (result.IsServerError)
+            return StatusCode(503, new { status = "ServiceUnavailable", message = result.Error });
+        if (result.Plan is null)
+            return Ok(new { status = "UnsupportedQuery", message = result.Error });
+        return Ok(new { markdownPlan = result.Markdown, jsonPlan = result.Plan });
     }
 
     // POST /api/assistant/plan/validate — validate a plan without executing it
@@ -1362,7 +1471,7 @@ else
     logger.LogWarning(
         "Plan generator: MockPlanGenerator (keyword matching only — no real NLP). " +
         "To enable real NL intent extraction set Gemini:ApiKey (free tier) or OpenAI:ApiKey. " +
-        "See docs/build-from-scratch.md §14.1 for how to obtain and configure a key.");
+        "See docs/build-from-scratch.md Step 14.1 for how to obtain and configure a key.");
 
 app.UseSwagger();
 app.UseSwaggerUI();
@@ -1385,7 +1494,7 @@ in mock mode by default. Never put your real key here:
 }
 ```
 
-Your real key goes in User Secrets (see §14.1) which override this file locally
+Your real key goes in User Secrets (see Step 14.1) which override this file locally
 and are never committed to git.
 
 **Concept — `AddSingleton` vs `AddScoped`:**
@@ -2148,7 +2257,7 @@ info: Plan generator: OpenAiPlanGenerator (gpt-4o-mini, structured outputs)
 # Without any key:
 warn: Plan generator: MockPlanGenerator (keyword matching only — no real NLP).
       To enable real NL intent extraction set Gemini:ApiKey (free tier) or OpenAI:ApiKey.
-      See docs/build-from-scratch.md §14.1 for how to obtain and configure a key.
+      See docs/build-from-scratch.md Step 14.1 for how to obtain and configure a key.
 ```
 If you see the `warn` line, you are in mock mode. The warning is intentional — there is no silent fallback.
 
