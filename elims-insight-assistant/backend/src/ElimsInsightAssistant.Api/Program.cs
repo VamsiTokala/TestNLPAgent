@@ -33,13 +33,13 @@ app.MapControllers();
 // Log active mode clearly at startup so there is no silent fallback to mock
 var logger = app.Services.GetRequiredService<ILogger<Program>>();
 if (!string.IsNullOrWhiteSpace(geminiKey))
-    logger.LogInformation("Plan generator: GeminiPlanGenerator (gemini-1.5-flash, JSON mode)");
+    logger.LogInformation("Plan generator: GeminiPlanGenerator (gemini-2.5-flash, JSON mode)");
 else if (!string.IsNullOrWhiteSpace(openAiKey))
     logger.LogInformation("Plan generator: OpenAiPlanGenerator (gpt-4o-mini, structured outputs)");
 else
     logger.LogWarning(
         "Plan generator: MockPlanGenerator (keyword matching only — no real NLP). " +
         "To enable real NL intent extraction set Gemini:ApiKey (free tier) or OpenAI:ApiKey. " +
-        "See docs/build-from-scratch.md §14.1 for how to obtain and configure a key.");
+        "See docs/build-from-scratch.md Step 14.1 for how to obtain and configure a key.");
 
 app.Run();

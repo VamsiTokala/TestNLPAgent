@@ -146,7 +146,7 @@ User query: {QUERY}
 
         var googleAi = new GoogleAI(apiKey: apiKey);
         _model = googleAi.GenerativeModel(
-            model: "gemini-1.5-flash",
+            model: "gemini-2.5-flash",
             generationConfig: new GenerationConfig { ResponseMimeType = "application/json" });
     }
 

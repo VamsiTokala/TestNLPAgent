@@ -786,7 +786,7 @@ User query: {QUERY}
 
         var googleAi = new GoogleAI(apiKey: apiKey);
         _model = googleAi.GenerativeModel(
-            model: "gemini-1.5-flash",
+            model: "gemini-2.5-flash",
             generationConfig: new GenerationConfig { ResponseMimeType = "application/json" });
     }
 
@@ -1464,7 +1464,7 @@ var app = builder.Build();
 // Log active mode clearly at startup so there is no silent fallback to mock
 var logger = app.Services.GetRequiredService<ILogger<Program>>();
 if (!string.IsNullOrWhiteSpace(geminiKey))
-    logger.LogInformation("Plan generator: GeminiPlanGenerator (gemini-1.5-flash, JSON mode)");
+    logger.LogInformation("Plan generator: GeminiPlanGenerator (gemini-2.5-flash, JSON mode)");
 else if (!string.IsNullOrWhiteSpace(openAiKey))
     logger.LogInformation("Plan generator: OpenAiPlanGenerator (gpt-4o-mini, structured outputs)");
 else
@@ -2170,7 +2170,13 @@ Any file change triggers an instant rebuild without restarting the server.
 
 To enable real NL intent extraction (queries like "which studies missed their deadline?")
 you need an API key for an LLM provider. **Gemini is recommended** — it has a free tier
-with hundreds of queries per day, no billing required.
+with no billing required.
+
+**Free tier limits for `gemini-2.5-flash`:** 5 requests per minute (RPM), 20 requests per day (RPD).
+That is enough for demos and hackathons. Check your live usage at https://ai.dev/rate-limit.
+
+> **Use `gemini-2.5-flash` specifically.** Older model names (`gemini-2.0-flash`, `gemini-1.5-flash`)
+> have zero free-tier quota on new projects and will return HTTP 429 immediately.
 
 ---
 
@@ -2197,6 +2203,27 @@ dotnet user-secrets set "Gemini:ApiKey" "AIza..."
 ```
 The key is stored in your OS user profile, not in the project folder.
 It is never included when you share or push the code.
+
+> **Critical — User Secrets only load in Development environment.**
+> .NET has three environments: Development, Staging, Production.
+> User Secrets are intentionally disabled in Production to prevent accidental exposure.
+> By default, `dotnet run` uses Production on most machines.
+>
+> You must set the environment before running — otherwise the key is ignored silently
+> and the app falls back to MockPlanGenerator even though the secret is saved.
+>
+> ```powershell
+> # Windows PowerShell — set once per terminal session
+> $env:ASPNETCORE_ENVIRONMENT = "Development"
+> dotnet run --urls http://localhost:5000
+> ```
+> ```bash
+> # Mac / Linux — inline or export
+> ASPNETCORE_ENVIRONMENT=Development dotnet run --urls http://localhost:5000
+> ```
+>
+> You will know it worked when you see `Hosting environment: Development` in the startup output.
+> If you see `Hosting environment: Production`, User Secrets are not being read.
 
 > **If you see: `Could not find the global property 'UserSecretsId'`**
 > The `.csproj` file is missing the `<UserSecretsId>` property. It is already
@@ -2249,7 +2276,7 @@ export OpenAI__ApiKey=sk-proj-...
 Every time the API starts, it logs one line before anything else:
 ```
 # With a Gemini key:
-info: Plan generator: GeminiPlanGenerator (gemini-1.5-flash, JSON mode)
+info: Plan generator: GeminiPlanGenerator (gemini-2.5-flash, JSON mode)
 
 # With an OpenAI key (and no Gemini key):
 info: Plan generator: OpenAiPlanGenerator (gpt-4o-mini, structured outputs)
@@ -2264,7 +2291,7 @@ If you see the `warn` line, you are in mock mode. The warning is intentional —
 **How the app chooses which generator to use (priority order):**
 ```
 Gemini:ApiKey present and non-empty?
-  YES → GeminiPlanGenerator  (real NLP via gemini-1.5-flash, JSON mode, free tier)
+  YES → GeminiPlanGenerator  (real NLP via gemini-2.5-flash, JSON mode, free tier)
   NO  →
     OpenAI:ApiKey present and non-empty?
       YES → OpenAiPlanGenerator  (real NLP via gpt-4o-mini, strict JSON schema)
@@ -2318,11 +2345,21 @@ If you see errors here, fix them before continuing — `dotnet run` will also fa
 
 **Step C — Run**
 
-Starts the API web server:
+Starts the API web server. If you set a Gemini key via User Secrets, include the environment flag
+so the key is actually read (User Secrets are ignored in Production mode):
 
-```bash
+```powershell
+# Windows PowerShell
+$env:ASPNETCORE_ENVIRONMENT = "Development"
 dotnet run --urls http://localhost:5000
 ```
+```bash
+# Mac / Linux
+ASPNETCORE_ENVIRONMENT=Development dotnet run --urls http://localhost:5000
+```
+
+If you set your key as an environment variable (`$env:Gemini__ApiKey`) instead of User Secrets,
+you can omit the `ASPNETCORE_ENVIRONMENT` flag — env vars are read in all environments.
 
 Expected startup output (mock mode — no key set):
 ```
@@ -2338,7 +2375,7 @@ info: Microsoft.Hosting.Lifetime[0]
 Expected startup output (Gemini key set):
 ```
 info: Program[0]
-      Plan generator: GeminiPlanGenerator (gemini-1.5-flash, JSON mode)
+      Plan generator: GeminiPlanGenerator (gemini-2.5-flash, JSON mode)
 info: Microsoft.Hosting.Lifetime[14]
       Now listening on: http://localhost:5000
 ```
@@ -2462,9 +2499,9 @@ run against the code directly in-process.
 
 | | Mock mode (no key) | Gemini mode (recommended) | OpenAI mode |
 |---|---|---|---|
-| **How it works** | Keyword matching in code | gemini-1.5-flash generates a JSON plan | gpt-4o-mini generates a JSON plan |
+| **How it works** | Keyword matching in code | gemini-2.5-flash generates a JSON plan | gpt-4o-mini generates a JSON plan |
 | **Startup log** | `warn: MockPlanGenerator` | `info: GeminiPlanGenerator` | `info: OpenAiPlanGenerator` |
-| **Cost** | Free — no API call | Free tier — hundreds of queries/day | ~$0.15 per million tokens |
+| **Cost** | Free — no API call | Free tier — 5 RPM, 20 RPD (no billing) | ~$0.15 per million tokens |
 | **Billing required** | No | No — Google AI Studio key only | Yes — card required |
 | **Queries that work** | Only the 4 hardcoded phrases | Any natural language query | Any natural language query |
 | **Response time** | ~5 ms | ~1–2 seconds | ~1–3 seconds |
@@ -2524,7 +2561,7 @@ dotnet run --urls http://localhost:5000
 
 Expected startup:
 ```
-info: Plan generator: GeminiPlanGenerator (gemini-1.5-flash, JSON mode)
+info: Plan generator: GeminiPlanGenerator (gemini-2.5-flash, JSON mode)
 ```
 
 **Test with free-text queries that mock mode cannot handle:**
@@ -2632,7 +2669,7 @@ they only know about `IPlanGenerator`, not which provider is behind it.
 
 | Provider | Model | Structured outputs | Free tier | Key format |
 |---|---|---|---|---|
-| Google Gemini (default) | gemini-1.5-flash | JSON mode (`ResponseMimeType`) | Yes — hundreds/day | `AIza...` |
+| Google Gemini (default) | gemini-2.5-flash | JSON mode (`ResponseMimeType`) | Yes — hundreds/day | `AIza...` |
 | OpenAI | gpt-4o-mini | `CreateJsonSchemaFormat` (strict) | No — billing required | `sk-proj-...` |
 | Anthropic Claude | claude-haiku-4-5 | Tool use / JSON mode | No — billing required | `sk-ant-...` |
 
@@ -2811,6 +2848,32 @@ Component binds response to template
 ---
 
 ## Common Mistakes and How to Avoid Them
+
+**Gemini key is set but startup still shows `warn: MockPlanGenerator`**
+User Secrets are only loaded when `ASPNETCORE_ENVIRONMENT=Development`. On most machines
+`dotnet run` defaults to Production, silently ignoring the secrets file.
+
+Fix — set the environment before running:
+```powershell
+# Windows PowerShell
+$env:ASPNETCORE_ENVIRONMENT = "Development"
+dotnet run --urls http://localhost:5000
+```
+```bash
+# Mac / Linux
+ASPNETCORE_ENVIRONMENT=Development dotnet run --urls http://localhost:5000
+```
+Confirm it worked: startup output should say `Hosting environment: Development`.
+
+**Gemini returns HTTP 429 with `"limit": 0` immediately**
+Older model names (`gemini-2.0-flash`, `gemini-1.5-flash`) have zero free-tier quota on new
+Google AI Studio projects. Use `gemini-2.5-flash` — that is the model with the active free quota.
+Check https://ai.dev/rate-limit to see which models have quota on your project.
+
+**Gemini free tier hit — HTTP 503 from the UI**
+The free tier limit is 5 requests per minute and 20 per day. If you click Run Query many times
+quickly, you hit the per-minute limit. Wait 60 seconds and try again.
+The backend logs show `fail: Gemini call failed` with a `retryDelay` of ~60 seconds.
 
 **"Could not find seed-data/studies.json"**
 The path in `DemoDataServices.cs` uses `..` to go up from `ContentRootPath`.
