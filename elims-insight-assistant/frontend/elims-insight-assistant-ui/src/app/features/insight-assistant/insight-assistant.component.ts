@@ -1,6 +1,6 @@
 import { Component, OnInit } from '@angular/core';
 import { FormBuilder, FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
-import { NgFor, NgIf, NgClass, JsonPipe, DatePipe } from '@angular/common';
+import { NgFor, NgIf, NgClass, JsonPipe, DatePipe, SlicePipe, LowerCasePipe } from '@angular/common';
 import { InsightAssistantApiService } from './services/insight-assistant-api.service';
 import { AssistantQueryResponse } from './models/assistant-query-response.model';
 import { ServiceContractEntry } from './models/service-contract.model';
@@ -9,7 +9,7 @@ import { ServiceContractEntry } from './models/service-contract.model';
   selector: 'app-insight-assistant',
   templateUrl: './insight-assistant.component.html',
   styleUrls: ['./insight-assistant.component.scss'],
-  imports: [ReactiveFormsModule, NgFor, NgIf, NgClass, JsonPipe, DatePipe]
+  imports: [ReactiveFormsModule, NgFor, NgIf, NgClass, JsonPipe, DatePipe, SlicePipe, LowerCasePipe]
 })
 export class InsightAssistantComponent implements OnInit {
   examples = [

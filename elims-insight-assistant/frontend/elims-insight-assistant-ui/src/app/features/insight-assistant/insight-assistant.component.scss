@@ -2,16 +2,20 @@
 $blue:         #2563eb;
 $blue-dark:    #1d4ed8;
 $green:        #16a34a;
+$green-dark:   #138a3e;
 $green-bg:     #dcfce7;
 $red:          #dc2626;
+$red-dark:     #b91c1c;
 $red-bg:       #fee2e2;
 $amber:        #d97706;
+$amber-dark:   #b45309;
 $amber-bg:     #fef3c7;
 $slate-50:     #f8fafc;
 $slate-100:    #f1f5f9;
 $slate-200:    #e2e8f0;
 $slate-400:    #94a3b8;
 $slate-500:    #64748b;
+$slate-600:    #475569;
 $slate-700:    #334155;
 $slate-900:    #0f172a;
 
@@ -180,7 +184,7 @@ $slate-900:    #0f172a;
   border-left: 3px solid $green;
   border-radius: 0 6px 6px 0;
   font-size: .78rem;
-  color: darken($green, 5%);
+  color: $green-dark;
   line-height: 1.4;
   .reason-label { font-weight: 700; }
 }
@@ -308,7 +312,7 @@ $slate-900:    #0f172a;
 }
 
 .service-reason {
-  font-size: .78rem; color: darken($green, 5%);
+  font-size: .78rem; color: $green-dark;
   background: #f0fdf4; border-left: 2px solid $green;
   padding: .3rem .5rem; border-radius: 0 5px 5px 0;
   margin-top: .35rem; line-height: 1.4;
@@ -603,7 +607,7 @@ $slate-900:    #0f172a;
   padding: .15rem .5rem;
   border-radius: 999px;
   background: $green-bg;
-  color: darken($green, 8%);
+  color: $green-dark;
 
   &--excluded { background: $slate-100; color: $slate-400; }
 }
@@ -656,8 +660,8 @@ $slate-900:    #0f172a;
   text-transform: none;
   letter-spacing: 0;
 
-  &.all-passed { background: $green-bg; color: darken($green, 5%); }
-  &.has-failures { background: $red-bg; color: darken($red, 5%); }
+  &.all-passed { background: $green-bg; color: $green-dark; }
+  &.has-failures { background: $red-bg; color: $red-dark; }
 }
 
 .validation-grid {
@@ -675,8 +679,8 @@ $slate-900:    #0f172a;
   padding: .3rem .65rem;
   border-radius: 999px;
 
-  &--pass { background: $green-bg; color: darken($green, 5%); }
-  &--fail { background: $red-bg; color: darken($red, 5%); }
+  &--pass { background: $green-bg; color: $green-dark; }
+  &--fail { background: $red-bg; color: $red-dark; }
 }
 
 // ── Summary cards ─────────────────────────────────────────────────────────────
@@ -699,9 +703,9 @@ $slate-900:    #0f172a;
   .stat-value { font-size: 2.2rem; font-weight: 700; line-height: 1; margin-bottom: .3rem; }
   .stat-label { font-size: .7rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
 
-  &.on-time       { border-top: 3px solid $green;  .stat-value { color: $green; }  .stat-label { color: darken($green, 6%); } }
-  &.delayed       { border-top: 3px solid $red;    .stat-value { color: $red; }    .stat-label { color: darken($red, 6%); } }
-  &.indeterminate { border-top: 3px solid $amber;  .stat-value { color: $amber; }  .stat-label { color: darken($amber, 6%); } }
+  &.on-time       { border-top: 3px solid $green;  .stat-value { color: $green; }  .stat-label { color: $green-dark; } }
+  &.delayed       { border-top: 3px solid $red;    .stat-value { color: $red; }    .stat-label { color: $red-dark; } }
+  &.indeterminate { border-top: 3px solid $amber;  .stat-value { color: $amber; }  .stat-label { color: $amber-dark; } }
 }
 
 // ── Section cards ─────────────────────────────────────────────────────────────
@@ -774,9 +778,9 @@ $slate-900:    #0f172a;
   font-weight: 700;
   letter-spacing: .04em;
   white-space: nowrap;
-  &.on-time       { background: $green-bg; color: darken($green, 5%); }
-  &.delayed       { background: $red-bg;   color: darken($red, 5%); }
-  &.indeterminate { background: $amber-bg; color: darken($amber, 5%); }
+  &.on-time       { background: $green-bg; color: $green-dark; }
+  &.delayed       { background: $red-bg;   color: $red-dark; }
+  &.indeterminate { background: $amber-bg; color: $amber-dark; }
 }
 
 .flag-chip {

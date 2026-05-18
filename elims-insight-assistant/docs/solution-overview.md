@@ -8,10 +8,18 @@
         ↓
 2. Angular POSTs to /api/assistant/query via proxy → .NET backend (port 5000)
         ↓
-3. IPlanGenerator.GenerateAsync(query)
+3. IServiceRegistry.GetAll() — builds live contract list from InMemoryServiceRegistry
+   (includes any contracts added via UI / POST /api/assistant/contracts)
+        ↓
+4. IPlanGenerator.GenerateAsync(query)
         ├── GeminiPlanGenerator  (Gemini:ApiKey set) → gemini-2.5-flash, JSON mode
         ├── OpenAiPlanGenerator  (OpenAI:ApiKey set) → gpt-4o-mini, strict JSON schema
         └── MockPlanGenerator    (no key)            → keyword matching, no API call
+
+   The prompt injected into Gemini/OpenAI is built dynamically from the registry:
+     • PromptBuilder.ServicesBlock()  — lists every registered contract with action/fields/purpose
+     • PromptBuilder.ExampleOperations() — shows the JSON operation shape per service
+     • PromptBuilder.CoreInstructions() — classification rules, supported query types
 
    Output: PlanGeneratorResult { Markdown, ExecutionPlan?, IsServerError }
 
@@ -26,16 +34,18 @@
    If Gemini returns supported=true but intent or operations are empty,
    GeminiPlanGenerator treats it as UnsupportedQuery (not a server error).
         ↓
-4. IPlanValidator.Validate(plan)
-   Completeness checks (new):
+5. IPlanValidator.Validate(plan)
+   The validator derives its allowlist and required-service list from IServiceRegistry at
+   validation time — no hardcoded lists.
+
+   Completeness checks:
      ✓ intent is non-blank
      ✓ operations list is non-empty
-     ✓ study-service is present in operations
-     ✓ corelabs-service is present in operations
+     ✓ all registry entries where IsRequired=true are present in operations
      ✓ entities contains "study" and "testp"
-   Allowlist checks:
-     ✓ every service name is in the allowlist
-     ✓ every field is in that service's field allowlist
+   Allowlist checks (derived from registry):
+     ✓ every service name matches a registered contract
+     ✓ every field is in that contract's field list
      ✓ every filter operator is in the operator allowlist
      ✓ every aggregate function is in the aggregate allowlist
      ✓ no write/update/delete action
@@ -43,7 +53,7 @@
      ✓ maxRows ≤ 500
    → Any failure: HTTP 400, plan is not executed
         ↓
-5. IExecutionEngine.ExecuteAsync(plan, userContext)
+6. IExecutionEngine.ExecuteAsync(plan, userContext)
    ✓ verifies user roles: StudyViewer + CoreLabsViewer (both required)
    ✓ fetches studies, filters to user's permitted legalEntities
    ✓ fetches completed TestPs (Status="Completed", CompletedAt not null)
@@ -56,13 +66,19 @@
    ✓ filters rows by plan.Output.IncludeClassifications
    ✓ truncates to plan.Limits.MaxRows (≤ 500)
         ↓
-6. IAuditService.Save(record)
+7. IAuditService.Save(record)
    Stores: traceId, planId, userId, query, plan, validation status,
            services called, execution timestamps, summary, result snapshot
    Retrievable via GET /api/assistant/audit/{traceId}
         ↓
-7. HTTP 200 → Angular renders:
-   ├── Summary cards (On Time / Delayed / Indeterminate counts)
+8. HTTP 200 → Angular renders:
+   ├── AI Interpretation panel
+   │     ├── Provider badge (Gemini 2.5 Flash / GPT-4o Mini / Mock)
+   │     ├── Intent Detected badge
+   │     ├── Classification Filter rows (included / excluded per classification)
+   │     ├── Service Contract Selection pipeline with per-operation AI reason
+   │     └── Validation checks grid (pass / fail pills)
+   ├── Summary stat cards (On Time / Delayed / Indeterminate counts)
    ├── Results table (only when status = "Completed")
    ├── Generated Plan (Markdown)
    └── JSON Execution Plan (collapsible)
@@ -72,7 +88,7 @@
 ```
 
 **The core safety property:** The LLM output is a JSON plan *proposal*. Nothing executes until the
-Validator passes every allowlist check at step 4. A hallucinated or adversarial plan — wrong service,
+Validator passes every allowlist check. A hallucinated or adversarial plan — wrong service,
 write operation, forbidden field — is rejected before any data is read.
 
 ---
@@ -83,17 +99,29 @@ write operation, forbidden field — is rejected before any data is read.
 User query (Angular UI)
     │
     ▼
+IServiceRegistry ────────────────────────────────────────────────────
+│  InMemoryServiceRegistry (ConcurrentDictionary)
+│  • Seeded with study-service [REQUIRED] and corelabs-service [REQUIRED]
+│  • Accepts new contracts at runtime via POST /api/assistant/contracts
+│  • Single source of truth for: AI prompt content, validator allowlist,
+│    required-service check, and UI contract catalogue
+    │
+    ▼ (contracts passed into)
 IPlanGenerator ──────────────────────────────────────────────────────
 │  GeminiPlanGenerator   Gemini:ApiKey set   gemini-2.5-flash JSON mode
 │  OpenAiPlanGenerator   OpenAI:ApiKey set   gpt-4o-mini strict schema
 │  MockPlanGenerator     no key              keyword matching, no cost
+│
+│  Prompt is built dynamically: PromptBuilder.CoreInstructions(contracts)
+│  includes every registered service with its action, fields, and purpose.
     │
-    ▼  ExecutionPlan { intent, entities, operations, output, limits }
+    ▼  ExecutionPlan { version, intent, entities, operations, output, limits }
+    │   operations[i].reason — why the AI selected this service
     │
 IPlanValidator ──────────────────────────────────────────────────────
 │  Plan completeness  →  intent? operations? required services/entities?
-│  Service allowlist  →  only study-service, corelabs-service
-│  Field allowlist    →  per-service field lists
+│  Service allowlist  →  derived from registry.GetAll() at validation time
+│  Field allowlist    →  per-contract field lists from registry
 │  Operator allowlist →  =, !=, >, >=, <, <=, in, between, is null, is not null
 │  Aggregate allowlist→  max, min, count, sum, avg
 │  Write guard        →  update/delete/write unconditionally rejected
@@ -118,39 +146,87 @@ HTTP 200 JSON response
 
 ---
 
-## Plan Generator — Three Modes
+## Dynamic Service Registry
 
-| Mode | Class | Activated when | How It Works |
-|---|---|---|---|
-| **Gemini** (recommended) | `GeminiPlanGenerator` | `Gemini:ApiKey` is set | Sends query + structured prompt to gemini-2.5-flash with `ResponseMimeType=application/json`; parses response into `ExecutionPlan`; post-parse check rejects blank intent or empty operations |
-| **OpenAI** | `OpenAiPlanGenerator` | `OpenAI:ApiKey` is set, no Gemini key | Sends query + system prompt to gpt-4o-mini with strict JSON schema enforcement; schema includes `output.includeClassifications` |
-| **Mock** | `MockPlanGenerator` | No API key (local dev, CI, tests) | Lowercases query, matches phrase list, calls `ResolveClassifications()` to pick the right filter — no network call, no cost |
+The `IServiceRegistry` / `InMemoryServiceRegistry` is the central extension point.
+It replaces all hardcoded allowlists and prompt text.
 
-**Priority order:** Gemini → OpenAI → Mock.
+### What it stores per contract
 
----
+| Field | Purpose |
+|---|---|
+| `Name` | Unique identifier used in plans (e.g. `study-service`) |
+| `DisplayName` | Human-readable label shown in the UI |
+| `Action` | The one allowed read action (e.g. `listStudies`) |
+| `Fields` | Allowlisted field names for this service |
+| `Purpose` | Injected into the AI prompt — tells the model *why* to use this service |
+| `Description` | Shown in the UI contract card (defaults to Purpose if blank) |
+| `IsRequired` | If true, validator rejects any plan that omits this service |
 
-## Error Handling Contract
+### What the registry drives automatically
 
-| Scenario | HTTP | `status` field | Client should |
-|---|---|---|---|
-| Query out of scope | 200 | `UnsupportedQuery` | Show reason message, do not retry |
-| Plan fails validation | 400 | — | Fix the plan |
-| Gemini returns incomplete plan | 200 | `UnsupportedQuery` | Show reason message, do not retry |
-| LLM provider down / network error | 503 | `ServiceUnavailable` | Retry with exponential backoff |
-| Success | 200 | `Completed` | Display summary + results |
+1. **AI prompt** — `PromptBuilder.CoreInstructions()` lists every contract so the LLM knows what's available.
+2. **Validator allowlist** — `PlanValidator` calls `registry.GetAll()` at validation time; no restarts required.
+3. **Required-service check** — contracts with `IsRequired=true` must appear in every valid plan.
+4. **UI catalogue** — `GET /api/assistant/contracts` returns the live list; contract cards update immediately.
+
+### REST API
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/assistant/contracts` | Returns all registered service contracts |
+| `POST` | `/api/assistant/contracts` | Registers a new contract; returns updated list |
+| `POST` | `/api/assistant/query` | Runs a natural-language query |
+| `GET` | `/api/assistant/audit/{traceId}` | Retrieves an audit record |
+
+### Register a new contract via UI (zero code changes)
+
+1. Open the app and click **+ Register Contract** in the Service Catalogue panel.
+2. Fill in: Service Name, Display Name, Action, Fields (comma-separated), and Purpose (injected into the AI prompt).
+3. Click **Register Contract**.
+
+The contract is stored in the registry. The next query automatically:
+- Includes the new service in the AI prompt
+- Allows the new service name/fields in the validator
+- Shows the contract card in the UI with "Selected" / "Unselected" state
+
+> **Limitation:** `InMemoryServiceRegistry` is process-local. Contracts registered at runtime are
+> lost when the backend restarts. For production, back the registry with a database and implement
+> `IServiceRegistry` over a persistent store.
 
 ---
 
 ## Extending the Design — Adding a New Service Contract
 
-This section explains what to change when you want the assistant to query a new
-downstream service (e.g. a `sample-service`, `equipment-service`, etc.).
+### Option A: Runtime via UI (no code changes)
 
-### Step 1 — Define the service interface and demo client
+Register the contract through the **+ Register Contract** form in the UI. The AI will begin
+considering it on the next query. See "Register a new contract via UI" above.
+
+Use this for demos, prototyping, and non-critical optional services.
+
+### Option B: Compile-time (persisted across restarts)
+
+Seed the contract in `InMemoryServiceRegistry` alongside the two built-in entries:
 
 ```csharp
-// Services/NewDataServices.cs
+// Services/ServiceRegistry.cs — add inside InMemoryServiceRegistry constructor
+_contracts["sample-service"] = new ServiceContractEntry(
+    Name:        "sample-service",
+    DisplayName: "Sample Service",
+    Action:      "listSamples",
+    Fields:      ["sampleId", "studyId", "status", "collectedAt"],
+    Purpose:     "Provides sample collection records and collection timestamps",
+    Description: "Sample collection catalogue — timestamps, status, and study linkage",
+    IsRequired:  false   // optional: set true to mandate it in every plan
+);
+```
+
+Then add the data client and wire up `ExecutionEngine`:
+
+**Step 1 — Define the service client** (`Services/NewDataServices.cs`):
+
+```csharp
 public interface ISampleServiceClient
 {
     Task<List<SampleDto>> ListSamplesAsync();
@@ -172,56 +248,25 @@ public record SampleDto(string SampleId, string StudyId, string Status, DateTime
 
 Add seed data to `seed-data/samples.json`.
 
-### Step 2 — Register in DI (`Program.cs`)
+**Step 2 — Register in DI** (`Program.cs`):
 
 ```csharp
 builder.Services.AddScoped<ISampleServiceClient, DemoSampleServiceClient>();
 ```
 
-### Step 3 — Add to the validator allowlist (`PlanValidator.cs`)
-
-```csharp
-private static readonly Dictionary<string, (HashSet<string> actions, HashSet<string> fields)> Allowlist = new()
-{
-    ["study-service"]    = ( ["listStudies"],  ["studyId","studyCode","customer","legalEntity","plannedCompletionDate"] ),
-    ["corelabs-service"] = ( ["listTestPs"],   ["testpId","studyId","status","completedAt","runType","result"] ),
-    // ── new ──────────────────────────────────────────────────────────────
-    ["sample-service"]   = ( ["listSamples"],  ["sampleId","studyId","status","collectedAt"] ),
-};
-```
-
-Also add `"sample-service"` to `RequiredServices` if you want the validator to
-mandate it, or leave it optional and only check presence when the plan asks for it.
-
-### Step 4 — Update the prompts (`PlanGenerator.cs`)
-
-In **both** `GeminiPlanGenerator.FullPrompt` and `OpenAiPlanGenerator.SystemPrompt`, add the new service to the `ALLOWED SERVICES AND FIELDS` block:
-
-```
-ALLOWED SERVICES AND FIELDS:
-  study-service    → action: listStudies  → fields: studyId, studyCode, customer, legalEntity, plannedCompletionDate
-  corelabs-service → action: listTestPs   → fields: testpId, studyId, status, completedAt, runType, result
-  sample-service   → action: listSamples  → fields: sampleId, studyId, status, collectedAt   ← new
-```
-
-For the **OpenAI strict schema**, add the new service name/action to the `operations.items` schema if you want it schema-enforced.
-
-For the **Mock generator**, add matching keywords to `SupportedTerms` and add a `ResolveClassifications`-style helper if the new service requires its own filter logic.
-
-### Step 5 — Use the new service in `ExecutionEngine.cs`
+**Step 3 — Use in ExecutionEngine** (`Execution/ExecutionEngine.cs`):
 
 ```csharp
 public class ExecutionEngine(
     IStudyServiceClient studyClient,
     ICoreLabsServiceClient coreLabsClient,
-    ISampleServiceClient sampleClient,          // ← inject new client
+    ISampleServiceClient sampleClient,   // ← inject
     IClassificationService classificationService) : IExecutionEngine
 {
     public async Task<...> ExecuteAsync(ExecutionPlan plan, UserContext userContext)
     {
         // existing fetch + classify logic ...
 
-        // fetch samples only when the plan asks for it
         if (plan.Operations.Any(o => o.Service == "sample-service"))
         {
             var samples = await sampleClient.ListSamplesAsync();
@@ -231,23 +276,62 @@ public class ExecutionEngine(
 }
 ```
 
-### Step 6 — (Optional) Add the new role to `UserContext`
+No changes needed to `PlanGenerator.cs`, `PlanValidator.cs`, or any frontend files —
+the registry handles all of that automatically.
 
-If the new service requires a separate authorisation role, add it to the
-role check at the top of `ExecutionEngine.ExecuteAsync` and update the demo
-`userContext` in `InsightAssistantApiService` on the frontend.
-
-### Summary checklist
+### Summary checklist (Option B)
 
 | # | File | What to add |
 |---|---|---|
-| 1 | `Services/NewDataServices.cs` | Interface + demo client + DTO |
-| 2 | `seed-data/<service>.json` | Seed data file |
-| 3 | `Program.cs` | DI registration |
-| 4 | `Validation/PlanValidator.cs` | Allowlist entry |
-| 5 | `Services/PlanGenerator.cs` | Prompt text (Gemini + OpenAI + Mock) |
-| 6 | `Execution/ExecutionEngine.cs` | Inject client + use in ExecuteAsync |
-| 7 | Frontend model | Add new fields to TypeScript interfaces if needed |
+| 1 | `Services/ServiceRegistry.cs` | Seed entry in `InMemoryServiceRegistry` constructor |
+| 2 | `Services/NewDataServices.cs` | Interface + demo client + DTO |
+| 3 | `seed-data/<service>.json` | Seed data file |
+| 4 | `Program.cs` | DI registration for the client |
+| 5 | `Execution/ExecutionEngine.cs` | Inject client + use in `ExecuteAsync` |
+
+---
+
+## Plan Generator — Three Modes
+
+| Mode | Class | Activated when | How It Works |
+|---|---|---|---|
+| **Gemini** (recommended) | `GeminiPlanGenerator` | `Gemini:ApiKey` is set | Sends query + dynamic prompt to gemini-2.5-flash with `ResponseMimeType=application/json`; parses response into `ExecutionPlan`; post-parse check rejects blank intent or empty operations |
+| **OpenAI** | `OpenAiPlanGenerator` | `OpenAI:ApiKey` is set, no Gemini key | Sends query + system prompt to gpt-4o-mini with strict JSON schema enforcement; schema includes `output.includeClassifications` and per-operation `reason` |
+| **Mock** | `MockPlanGenerator` | No API key (local dev, CI, tests) | Lowercases query, matches phrase list, calls `ResolveClassifications()` to pick the right filter — no network call, no cost |
+
+**Priority order:** Gemini → OpenAI → Mock.
+
+All three generators receive the live registry so their output always reflects
+the current set of registered contracts.
+
+---
+
+## AI Interpretation Panel — What the UI Shows
+
+After a query runs, the AI Interpretation panel reveals the LLM's reasoning in real time:
+
+| Section | What it shows |
+|---|---|
+| **Provider badge** | Which generator was used (Gemini 2.5 Flash / GPT-4o Mini / Mock) |
+| **Intent Detected** | The `intent` string from the plan (e.g. `find_studies_not_completed_on_time`) |
+| **Classification Filter** | All three classifications with "included" / "excluded" status based on `output.includeClassifications` |
+| **Service Contract Selection** | Each selected operation as a pipeline card showing service name, action tag, and the AI's per-operation `reason` |
+| **Validation** | Pass/fail pill for every check the validator ran |
+
+The Service Catalogue cards simultaneously show "✓ Selected" on contracts the AI picked
+and dim the ones it skipped, with the AI's reason displayed inline.
+
+---
+
+## Error Handling Contract
+
+| Scenario | HTTP | `status` field | Client should |
+|---|---|---|---|
+| Query out of scope | 200 | `UnsupportedQuery` | Show reason message, do not retry |
+| Plan fails validation | 400 | — | Fix the plan |
+| Gemini returns incomplete plan | 200 | `UnsupportedQuery` | Show reason message, do not retry |
+| LLM provider down / network error | 503 | — | Retry with exponential backoff |
+| Success | 200 | `Completed` | Display summary + results |
 
 ---
 

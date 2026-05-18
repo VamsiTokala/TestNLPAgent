@@ -1,11 +1,12 @@
 using ElimsInsightAssistant.Api.Models;
+using ElimsInsightAssistant.Api.Services;
 using ElimsInsightAssistant.Api.Validation;
 
 namespace ElimsInsightAssistant.Tests;
 
 public class ValidatorTests
 {
-    private readonly PlanValidator _validator = new();
+    private readonly PlanValidator _validator = new(new InMemoryServiceRegistry());
 
     private static ExecutionPlan ApprovedPlan => new()
     {
