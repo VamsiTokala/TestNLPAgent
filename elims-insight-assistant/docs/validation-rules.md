@@ -15,8 +15,7 @@ Ensures the LLM returned a structurally complete plan, not a partial or confused
 |---|---|
 | Intent present | `plan.Intent` is non-null and non-whitespace |
 | Operations non-empty | `plan.Operations` contains at least one entry |
-| study-service present | at least one operation targets `study-service` |
-| corelabs-service present | at least one operation targets `corelabs-service` |
+| Required services present | all contracts with `IsRequired=true` in `IServiceRegistry` appear in operations (currently: `study-service`, `corelabs-service`) |
 | Entities non-empty | `plan.Entities` contains `"study"` and `"testp"` |
 
 These checks stop a blank-intent / empty-operations plan (which a confused LLM can
@@ -30,13 +29,14 @@ the validator runs — if intent is blank or operations is empty, it returns
 
 ### 2. Service Allowlist
 
-Every `operation.service` must be a key in the allowlist:
+Every `operation.service` must match a contract registered in `IServiceRegistry`.
+The allowlist is derived at validation time — `PlanValidator(IServiceRegistry registry)` calls
+`registry.GetAll()` so newly registered contracts are immediately permitted without a restart.
 
-```
-study-service, corelabs-service
-```
+Currently registered (built-in): `study-service`, `corelabs-service`
+Additional contracts can be registered via `POST /api/assistant/contracts` or the UI **+ Register Contract** button.
 
-Any service name not in that set is rejected — the LLM cannot invent new service endpoints.
+Any service name not in the registry is rejected — the LLM cannot invent new service endpoints.
 
 ---
 
@@ -48,6 +48,8 @@ Every field in `operation.select` must be in that service's permitted field list
 |---|---|
 | `study-service` | `studyId`, `studyCode`, `customer`, `legalEntity`, `plannedCompletionDate` |
 | `corelabs-service` | `testpId`, `studyId`, `status`, `completedAt`, `runType`, `result` |
+
+Field lists are also derived from the registry — each contract's `Fields` array defines what is permitted for that service.
 
 ---
 

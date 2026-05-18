@@ -146,48 +146,40 @@ Expected: ST-002 (Delayed, 2 days late) and ST-004 (Indeterminate, missing data)
 
 Open `http://localhost:4200` after starting both backend and frontend.
 
-**Initial state** — input pre-filled, four example buttons:
-```
-eLIMS Insight Assistant
-Governed Natural-Language Analytics
+**Service Catalogue** (top of page) — shows every registered service contract as a card.
+After a query runs, cards light up with "✓ Selected" or dim to show which services the AI picked.
 
-Ask eLIMS  [Find studies not completed on time      ] [Run Query]
+**Query bar** — pre-filled with an example query; four quick-pick buttons below.
 
-[Find studies not completed on time] [Show delayed studies]
-[Show indeterminate studies] [Show completed late studies]
-```
+**AI Interpretation panel** (appears after Run Query):
+- **Provider badge** — which generator was used (Gemini 2.5 Flash / GPT-4o Mini / Mock)
+- **Intent Detected** — the `intent` string extracted from the query
+- **Classification Filter** — all three classifications (On Time / Delayed / Indeterminate) shown as "included" or "excluded" based on what the AI chose
+- **Service Contract Selection** — pipeline cards for each selected service with the AI's per-operation reason
+- **Validation** — pass/fail pill for every validator check
 
-**After clicking Run Query** — four sections appear below:
-```
-── Summary ──────────────────────────────────────
-On Time: 2 | Delayed: 1 | Indeterminate: 1
+**Summary cards** — On Time / Delayed / Indeterminate counts across all studies.
 
-── Results ──────────────────────────────────────
-ST-002 (XYZ Labs)  → Delayed        2 days after planned date
-ST-004 (Delta Bio) → Indeterminate  Missing planned/actual dates
+**Results table** — rows matching the classification filter.
 
-── Generated Plan ───────────────────────────────
-# Analysis Plan
-Intent: Find studies not completed on time.
-Steps: Fetch studies → Fetch TestPs → Correlate → Classify → Return
-
-── JSON Execution Plan ──────────────────────────
-{ "version": "1.0", "intent": "find_studies_not_completed_on_time", ... }
-```
-
-See `docs/build-from-scratch.md §Part 15` for annotated screen-by-screen walkthrough.
+**Register a new contract** — click **+ Register Contract**, fill in the form, and the AI immediately considers it on the next query (no restart needed).
 
 ## API Endpoints
 
 | Method | Endpoint | Description |
 |---|---|---|
-| POST | `/api/assistant/query` | Full pipeline: generate → validate → execute → audit |
-| POST | `/api/assistant/plan` | Generate plan only, no execution |
-| POST | `/api/assistant/plan/validate` | Validate a plan without executing |
-| POST | `/api/assistant/execute` | Execute a pre-built validated plan |
-| GET | `/api/assistant/audit/{traceId}` | Retrieve audit record by trace ID |
-| GET | `/api/demo/studies` | View seed study data |
-| GET | `/api/demo/corelabs/testps` | View seed TestP data |
+| `GET` | `/api/assistant/contracts` | List all registered service contracts |
+| `POST` | `/api/assistant/contracts` | Register a new service contract |
+| `POST` | `/api/assistant/query` | Full pipeline: generate → validate → execute → audit |
+| `POST` | `/api/assistant/plan` | Generate plan only, no execution |
+| `POST` | `/api/assistant/plan/validate` | Validate a plan without executing |
+| `POST` | `/api/assistant/execute` | Execute a pre-built validated plan |
+| `GET` | `/api/assistant/audit/{traceId}` | Retrieve audit record by trace ID |
+| `GET` | `/api/demo/studies` | View seed study data |
+| `GET` | `/api/demo/corelabs/testps` | View seed TestP data |
+
+Swagger UI: `http://localhost:5000/swagger`
+OpenAPI spec: `http://localhost:5000/swagger/v1/swagger.json`
 
 ## Error Handling
 
@@ -207,7 +199,7 @@ elims-insight-assistant/
 ├── backend/src/
 │   ├── ElimsInsightAssistant.Api/
 │   │   ├── Controllers/     HTTP entry points
-│   │   ├── Services/        Plan generation (Gemini, OpenAI, Mock), classification, data clients
+│   │   ├── Services/        Plan generation (Gemini, OpenAI, Mock), service registry, classification, data clients
 │   │   ├── Validation/      Allowlist validator
 │   │   ├── Execution/       Execution engine
 │   │   ├── Audit/           In-memory audit store
@@ -235,13 +227,31 @@ This makes the system safe for regulated environments regardless of what the LLM
 
 ## Extending — Adding a New Service Contract
 
-To teach the assistant to query a new downstream service:
+### Option A: Via the UI (zero code changes)
 
-1. **Define** the service interface + demo client in `Services/` and seed data in `seed-data/`
-2. **Register** in `Program.cs` DI
-3. **Add to allowlist** in `Validation/PlanValidator.cs`
-4. **Update prompts** in `Services/PlanGenerator.cs` (Gemini, OpenAI, Mock)
-5. **Use in engine** — inject the new client in `Execution/ExecutionEngine.cs`
+Click **+ Register Contract** in the Service Catalogue panel and fill in:
+- **Service Name** — identifier used in plans (e.g. `sample-service`)
+- **Action** — the one allowed read action (e.g. `listSamples`)
+- **Fields** — comma-separated allowlisted fields
+- **Purpose for AI** — injected into the prompt; tells the LLM why to use this service
 
-See `docs/solution-overview.md § Extending the Design` for the full guide with code snippets,
-and `docs/service-contracts.md` for the current contract reference.
+The contract is live immediately. The AI prompt, validator allowlist, and UI catalogue all update automatically.
+
+> Contracts registered at runtime are process-local (`InMemoryServiceRegistry`). Seed them in code for persistence across restarts.
+
+### Option B: In code (persisted across restarts)
+
+Seed the entry in `InMemoryServiceRegistry` and add an `ExecutionEngine` client.
+See `docs/solution-overview.md § Extending the Design — Option B` for the full guide.
+
+**Files to touch:**
+
+| File | Change |
+|---|---|
+| `Services/ServiceRegistry.cs` | Seed entry in constructor |
+| `Services/NewDataServices.cs` | Interface + demo client + DTO |
+| `seed-data/<service>.json` | Seed data |
+| `Program.cs` | DI registration |
+| `Execution/ExecutionEngine.cs` | Inject + call in `ExecuteAsync` |
+
+No changes to `PlanGenerator.cs`, `PlanValidator.cs`, or any frontend file.
