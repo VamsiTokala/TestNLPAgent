@@ -22,6 +22,7 @@ public record PlanGeneratorResult(
 
 public interface IPlanGenerator
 {
+    string ProviderName { get; }
     Task<PlanGeneratorResult> GenerateAsync(string query);
 }
 
@@ -29,6 +30,8 @@ public interface IPlanGenerator
 
 public class MockPlanGenerator : IPlanGenerator
 {
+    public string ProviderName => "Mock (keyword matching)";
+
     private static readonly string[] SupportedTerms =
     [
         "not completed on time", "delayed studies", "completed late", "not on time",
@@ -115,6 +118,8 @@ Read-only, deterministic, approved service contracts only.
 
 public class GeminiPlanGenerator : IPlanGenerator
 {
+    public string ProviderName => "Gemini 2.5 Flash";
+
     private readonly GenerativeModel _model;
     private readonly ILogger<GeminiPlanGenerator> _logger;
 
@@ -274,6 +279,8 @@ User query: {QUERY}
 
 public class OpenAiPlanGenerator : IPlanGenerator
 {
+    public string ProviderName => "GPT-4o Mini";
+
     private readonly ChatClient _client;
     private readonly ILogger<OpenAiPlanGenerator> _logger;
 

@@ -26,7 +26,7 @@ public class AssistantController(
 
         // Genuinely unsupported query → 200 with status flag (not an error, just out of scope)
         if (result.Plan is null)
-            return Ok(new AssistantQueryResponse { Status = "UnsupportedQuery", Message = result.Error ?? "Unsupported query" });
+            return Ok(new AssistantQueryResponse { Status = "UnsupportedQuery", PlanGeneratorMode = planGenerator.ProviderName, Message = result.Error ?? "Unsupported query" });
 
         var validation = validator.Validate(result.Plan);
         validation = validation with { Checks = [.. validation.Checks, new("User authorization", "Passed")] };
@@ -41,13 +41,14 @@ public class AssistantController(
 
         var response = new AssistantQueryResponse
         {
-            PlanId       = planId,
-            TraceId      = traceId,
-            MarkdownPlan = result.Markdown,
-            JsonPlan     = result.Plan,
-            Validation   = validation,
-            Summary      = summary,
-            Results      = rows
+            PlanId             = planId,
+            TraceId            = traceId,
+            PlanGeneratorMode  = planGenerator.ProviderName,
+            MarkdownPlan       = result.Markdown,
+            JsonPlan           = result.Plan,
+            Validation         = validation,
+            Summary            = summary,
+            Results            = rows
         };
 
         auditService.Save(new AuditRecord

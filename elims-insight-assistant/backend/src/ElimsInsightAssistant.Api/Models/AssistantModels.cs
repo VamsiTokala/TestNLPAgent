@@ -8,6 +8,7 @@ public record AssistantQueryResponse
     public string PlanId { get; init; } = string.Empty;
     public string TraceId { get; init; } = string.Empty;
     public string Status { get; init; } = "Completed";
+    public string PlanGeneratorMode { get; init; } = string.Empty;
     public string MarkdownPlan { get; init; } = string.Empty;
     public ExecutionPlan JsonPlan { get; init; } = new();
     public ValidationResult Validation { get; init; } = new();

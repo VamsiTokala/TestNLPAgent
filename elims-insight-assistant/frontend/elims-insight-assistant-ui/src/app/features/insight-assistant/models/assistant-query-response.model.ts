@@ -22,6 +22,7 @@ export interface AssistantQueryResponse {
   planId: string;
   traceId: string;
   status: string;
+  planGeneratorMode: string;
   markdownPlan: string;
   jsonPlan: ExecutionPlan;
   validation: ValidationResult;

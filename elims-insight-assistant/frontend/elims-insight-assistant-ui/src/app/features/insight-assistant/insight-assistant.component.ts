@@ -18,8 +18,11 @@ export class InsightAssistantComponent {
     'Show completed late studies'
   ];
 
+  readonly allClassifications = ['On Time', 'Delayed', 'Indeterminate'];
+
   response: AssistantQueryResponse | null = null;
   error: string | null = null;
+  isLoading = false;
   form: FormGroup;
 
   get queryControl(): FormControl { return this.form.get('query') as FormControl; }
@@ -34,13 +37,27 @@ export class InsightAssistantComponent {
   runQuery(): void {
     this.error = null;
     this.response = null;
+    this.isLoading = true;
     this.api.query(this.form.value.query || '').subscribe({
-      next: (r: AssistantQueryResponse) => { this.response = r; },
+      next: (r: AssistantQueryResponse) => { this.response = r; this.isLoading = false; },
       error: (err) => {
         this.error = err?.error?.errors?.join(', ') ?? err?.error?.title ?? 'An unexpected error occurred. Please try again.';
+        this.isLoading = false;
       }
     });
   }
 
   setQuery(q: string): void { this.form.patchValue({ query: q }); }
+
+  isClassificationIncluded(c: string): boolean {
+    return this.response?.jsonPlan?.output?.includeClassifications?.includes(c) ?? false;
+  }
+
+  classificationBadgeClass(c: string): string {
+    return c.toLowerCase().replace(' ', '-');
+  }
+
+  get allValidationPassed(): boolean {
+    return this.response?.validation?.checks?.every(c => c.status === 'Passed') ?? false;
+  }
 }
