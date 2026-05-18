@@ -25,26 +25,25 @@ public class InMemoryServiceRegistry : IServiceRegistry
 
     public InMemoryServiceRegistry()
     {
-        _contracts = new(StringComparer.OrdinalIgnoreCase,
-        [
-            KV("study-service", new ServiceContractEntry(
-                Name: "study-service",
-                DisplayName: "Study Service",
-                Action: "listStudies",
-                Fields: ["studyId", "studyCode", "customer", "legalEntity", "plannedCompletionDate"],
-                Purpose: "Provides study identity, customer, legal entity, and planned completion dates",
-                Description: "Core study catalogue — identity, customer assignment, legal entity, and planned completion timeline",
-                IsRequired: true)),
+        _contracts = new(StringComparer.OrdinalIgnoreCase);
 
-            KV("corelabs-service", new ServiceContractEntry(
-                Name: "corelabs-service",
-                DisplayName: "CoreLabs Service",
-                Action: "listTestPs",
-                Fields: ["testpId", "studyId", "status", "completedAt", "runType", "result"],
-                Purpose: "Provides TestP execution records — status, run type, result, and actual completion timestamps",
-                Description: "TestP execution records — actual completion timestamps are derived from the maximum TestP.completedAt per study",
-                IsRequired: true)),
-        ]);
+        Register(new ServiceContractEntry(
+            Name: "study-service",
+            DisplayName: "Study Service",
+            Action: "listStudies",
+            Fields: ["studyId", "studyCode", "customer", "legalEntity", "plannedCompletionDate"],
+            Purpose: "Provides study identity, customer, legal entity, and planned completion dates",
+            Description: "Core study catalogue — identity, customer assignment, legal entity, and planned completion timeline",
+            IsRequired: true));
+
+        Register(new ServiceContractEntry(
+            Name: "corelabs-service",
+            DisplayName: "CoreLabs Service",
+            Action: "listTestPs",
+            Fields: ["testpId", "studyId", "status", "completedAt", "runType", "result"],
+            Purpose: "Provides TestP execution records — status, run type, result, and actual completion timestamps",
+            Description: "TestP execution records — actual completion timestamps are derived from the maximum TestP.completedAt per study",
+            IsRequired: true));
     }
 
     public IReadOnlyList<ServiceContractEntry> GetAll() =>
@@ -56,5 +55,4 @@ public class InMemoryServiceRegistry : IServiceRegistry
     public void Register(ServiceContractEntry entry) =>
         _contracts.AddOrUpdate(entry.Name, entry, (_, _) => entry);
 
-    private static KeyValuePair<string, ServiceContractEntry> KV(string k, ServiceContractEntry v) => new(k, v);
 }
