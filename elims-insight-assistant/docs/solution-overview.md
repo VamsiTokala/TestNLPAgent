@@ -1,28 +1,63 @@
 # Solution Overview
 
-## Architecture
+## Request Flow — What Happens on Every Query
+
+```
+1. User types a query in Angular UI  (e.g. "which studies missed their deadline?")
+        ↓
+2. Angular POSTs to /api/assistant/query via proxy → .NET backend on port 5000
+        ↓
+3. IPlanGenerator.GenerateAsync(query)
+        ├── GeminiPlanGenerator  (Gemini:ApiKey set) → calls gemini-2.5-flash → returns JSON plan
+        ├── OpenAiPlanGenerator  (OpenAI:ApiKey set) → calls gpt-4o-mini  → returns JSON plan
+        └── MockPlanGenerator    (no key)            → keyword match      → returns fixed plan
+   Output: PlanGeneratorResult { Markdown, ExecutionPlan, IsServerError }
+        ↓
+4. IPlanValidator.Validate(plan)
+   — checks every service name, field, operator, aggregate against allowlist
+   — rejects write operations unconditionally
+   — if any check fails → HTTP 400, plan is not executed
+        ↓
+5. IExecutionEngine.ExecuteAsync(plan, userContext)
+   — verifies user has required roles (StudyViewer, CoreLabsViewer)
+   — filters results to user's permitted legal entities
+   — fetches studies from DemoStudyServiceClient (seed JSON)
+   — fetches TestPs from DemoCoreLabsServiceClient (seed JSON)
+   — correlates by studyId, derives actualCompletionDate = max(TestP.completedAt)
+   — classifies each study: On Time / Delayed / Indeterminate
+        ↓
+6. IAuditService.Save(record)
+   — stores traceId, planId, userId, query, plan, validation, results, timestamps
+   — retrievable via GET /api/assistant/audit/{traceId}
+        ↓
+7. HTTP 200 response → Angular renders Summary + Results + Plan + JSON Plan
+```
+
+**Why the LLM never touches data directly:**
+The LLM output is a JSON plan proposal — nothing executes until the Validator approves it.
+A malicious or hallucinated plan (wrong service, write operation, forbidden field) is rejected
+at step 4 before any data is fetched. This makes the system safe regardless of LLM behaviour.
+
+## Architecture (Component View)
 
 ```
 User query
     ↓
 IPlanGenerator (async)
-    ├── GeminiPlanGenerator  — when Gemini:ApiKey is configured (gemini-2.5-flash, JSON mode) [recommended]
-    ├── OpenAiPlanGenerator  — when OpenAI:ApiKey is configured (gpt-4o-mini, strict JSON schema)
-    └── MockPlanGenerator    — fallback when no key is set (keyword matching, no API call)
+    ├── GeminiPlanGenerator  — Gemini:ApiKey configured (gemini-2.5-flash, JSON mode) [recommended]
+    ├── OpenAiPlanGenerator  — OpenAI:ApiKey configured (gpt-4o-mini, strict JSON schema)
+    └── MockPlanGenerator    — no key set (keyword matching, no API call, no cost)
     ↓
 IPlanValidator
-    — allowlist check: services, fields, operators, aggregates, maxRows
+    — allowlist: services, fields, operators, aggregates, maxRows
     — injection detection on filter values
     ↓
 IExecutionEngine
-    — authorisation (role check)
-    — legal entity filter
-    — fetch studies + TestPs from demo seed data
-    — correlate, group, derive actual completion (max TestP timestamp)
-    — classify: On Time / Delayed / Indeterminate
+    — role + legal entity authorisation
+    — fetch seed data, correlate, classify
     ↓
 IAuditService
-    — persist full query record in ConcurrentDictionary (in-memory)
+    — in-memory ConcurrentDictionary, queryable by traceId
     ↓
 HTTP response (JSON)
 ```
@@ -37,7 +72,10 @@ HTTP response (JSON)
 
 **Priority order:** Gemini → OpenAI → Mock. Switching is automatic — `Program.cs` reads config at startup and registers the right implementation. The startup log always states which mode is active.
 
-**Getting a free key (Gemini):** Go to https://aistudio.google.com → Get API key. No billing required. Hundreds of free queries per day.
+**Getting a free key (Gemini):** Go to https://aistudio.google.com → Get API key → Create API key in new project. No billing required.
+Free tier limits: **5 requests/minute, 20 requests/day** for `gemini-2.5-flash`. Use that model specifically — older names (gemini-2.0-flash, gemini-1.5-flash) have zero quota on new projects.
+
+**User Secrets require Development environment:** Run with `ASPNETCORE_ENVIRONMENT=Development` (or set `$env:Gemini__ApiKey` directly as an env var, which works in any environment).
 
 ## Why the LLM Does Not Execute Directly
 

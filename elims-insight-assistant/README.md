@@ -7,10 +7,29 @@ and returns structured results — without letting an AI freely query databases.
 ## How It Works
 
 ```
-User query → Plan Generator → Validator → Execution Engine → Audit → Response
+User types query in Angular UI
+        ↓
+Angular dev server proxies POST /api/assistant/query to .NET backend (port 5000)
+        ↓
+Plan Generator — converts natural language to a structured JSON execution plan
+  • Gemini / OpenAI: real NLP understands any phrasing ("overdue trials", "missed deadline")
+  • Mock: keyword matching for local dev without an API key
+        ↓
+Validator — checks the plan against a strict allowlist BEFORE anything runs
+  • Only approved services (study-service, corelabs-service) are permitted
+  • Only approved fields, operators, and row limits are allowed
+  • Write operations are unconditionally blocked
+        ↓
+Execution Engine — runs the approved plan against demo seed data
+  • Verifies user roles and legal entities
+  • Fetches studies + TestPs, correlates, classifies On Time / Delayed / Indeterminate
+        ↓
+Audit Service — records every query, who ran it, what plan was used, what it returned
+        ↓
+JSON response → Angular UI renders Summary + Results + Plan
 ```
 
-Every query is validated against an allowlist before anything runs. Every query is recorded.
+The LLM never touches data. It only proposes a plan. The Validator decides whether that plan is safe to run — regardless of what the LLM said.
 
 ## Plan Generator Modes
 
@@ -39,20 +58,38 @@ warn: Plan generator: MockPlanGenerator (keyword matching only — no real NLP).
 To enable real NL intent extraction, choose a provider:
 
 #### Option A — Google Gemini (recommended — free tier, no billing)
-1. Go to https://aistudio.google.com and sign in
-2. Click **Get API key** → **Create API key** (starts with `AIza...`)
+1. Go to **https://aistudio.google.com** and sign in
+2. Click **Get API key** → **Create API key in new project** (starts with `AIza...`)
 3. Set the key — never commit it to git:
 
 ```bash
 # Recommended: stored in OS user profile, not in the project
 dotnet user-secrets set "Gemini:ApiKey" "AIza..."
-
-# Or via environment variable (double underscore __ required)
-export Gemini__ApiKey=AIza...   # Mac/Linux
-set Gemini__ApiKey=AIza...      # Windows
 ```
 
-When the Gemini key is set, startup logs:
+> **Important — User Secrets only work in Development environment.**
+> Run with the environment set explicitly:
+> ```powershell
+> # Windows PowerShell
+> $env:ASPNETCORE_ENVIRONMENT = "Development"
+> dotnet run --urls http://localhost:5000
+> ```
+> ```bash
+> # Mac / Linux
+> ASPNETCORE_ENVIRONMENT=Development dotnet run --urls http://localhost:5000
+> ```
+> Without this, .NET runs in Production mode and ignores User Secrets silently.
+> You will see `warn: MockPlanGenerator` even if the key is set.
+>
+> **Alternatively**, set the key as an environment variable (works in any environment):
+> ```powershell
+> $env:Gemini__ApiKey = "AIza..."   # Windows PowerShell (double underscore)
+> dotnet run --urls http://localhost:5000
+> ```
+
+**Free tier limits (Google AI Studio):** 5 requests/minute, 20 requests/day — enough for demos and hackathons. Use `gemini-2.5-flash` specifically; older models (gemini-2.0-flash, gemini-1.5-flash) may have zero quota on new projects.
+
+When the Gemini key is active, startup logs:
 ```
 info: Plan generator: GeminiPlanGenerator (gemini-2.5-flash, JSON mode)
 ```
