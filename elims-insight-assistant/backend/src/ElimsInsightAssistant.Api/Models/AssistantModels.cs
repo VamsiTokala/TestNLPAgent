@@ -39,7 +39,7 @@ public record ExecutionPlan
     public PlanLimits Limits { get; init; } = new(500, true);
 }
 
-public record PlanOperation(string Service, string Action, List<string> Select, List<PlanFilter> Filters);
+public record PlanOperation(string Service, string Action, List<string> Select, List<PlanFilter> Filters, string? Reason = null);
 public record PlanFilter(string Field, string Op, string? Value);
 public record PlanCorrelate(string LeftEntity = "study", string RightEntity = "testp", string LeftField = "studyId", string RightField = "studyId");
 public record PlanTransform(List<string>? GroupBy = null, List<PlanAggregate>? Aggregates = null)

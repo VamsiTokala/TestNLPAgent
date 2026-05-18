@@ -36,6 +36,284 @@ $slate-900:    #0f172a;
   }
 }
 
+// ── Service Catalogue ─────────────────────────────────────────────────────────
+.catalogue-card {
+  background: #fff;
+  border: 1.5px solid $slate-200;
+  border-radius: 14px;
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1.25rem;
+  box-shadow: 0 1px 4px rgba(0,0,0,.05);
+}
+
+.catalogue-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+  gap: .5rem;
+}
+
+.catalogue-title-group {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  h3 { margin: 0; font-size: .95rem; font-weight: 700; color: $slate-900; }
+}
+
+.catalogue-icon { font-size: 1.1rem; color: #6366f1; }
+
+.catalogue-count {
+  font-size: .75rem;
+  font-weight: 600;
+  background: $slate-100;
+  color: $slate-500;
+  padding: .2rem .55rem;
+  border-radius: 999px;
+}
+
+.catalogue-selected {
+  font-size: .75rem;
+  color: $green;
+  font-weight: 600;
+}
+
+.btn-add {
+  padding: .38rem .9rem;
+  font-size: .8rem;
+  font-weight: 600;
+  background: #ede9fe;
+  color: #5b21b6;
+  border: 1px solid #c4b5fd;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background .15s;
+  white-space: nowrap;
+  &:hover { background: #ddd6fe; }
+}
+
+// ── Contract cards grid ───────────────────────────────────────────────────────
+.contracts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: .75rem;
+  margin-bottom: .25rem;
+}
+
+.contract-card {
+  border: 1.5px solid $slate-200;
+  border-radius: 10px;
+  padding: .9rem 1rem;
+  transition: border-color .2s, box-shadow .2s, transform .15s;
+  background: $slate-50;
+
+  &--selected {
+    border-color: #6366f1;
+    background: #f5f3ff;
+    box-shadow: 0 0 0 3px rgba(99,102,241,.12);
+    transform: translateY(-1px);
+  }
+
+  &--unselected { opacity: .5; }
+}
+
+.contract-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: .35rem;
+}
+
+.contract-name-group { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
+
+.contract-name {
+  font-size: .85rem;
+  font-weight: 700;
+  color: #3730a3;
+  font-family: monospace;
+}
+
+.contract-required-tag {
+  font-size: .65rem; font-weight: 700; text-transform: uppercase;
+  background: #e0e7ff; color: #3730a3; padding: .1rem .4rem; border-radius: 4px;
+}
+
+.contract-optional-tag {
+  font-size: .65rem; font-weight: 700; text-transform: uppercase;
+  background: $slate-100; color: $slate-400; padding: .1rem .4rem; border-radius: 4px;
+}
+
+.contract-selected-badge {
+  font-size: .7rem; font-weight: 700;
+  background: #6366f1; color: #fff;
+  padding: .15rem .5rem; border-radius: 999px;
+  white-space: nowrap;
+}
+
+.contract-action {
+  font-size: .78rem; color: $slate-500; margin-bottom: .4rem;
+  font-family: monospace;
+}
+
+.contract-description {
+  font-size: .8rem; color: $slate-700; margin-bottom: .55rem; line-height: 1.4;
+}
+
+.contract-fields {
+  display: flex; flex-wrap: wrap; gap: .25rem;
+}
+
+.field-chip {
+  font-size: .68rem;
+  background: #e0e7ff;
+  color: #3730a3;
+  border-radius: 4px;
+  padding: .1rem .4rem;
+  font-family: monospace;
+}
+
+.contract-reason {
+  margin-top: .55rem;
+  padding: .45rem .6rem;
+  background: #f0fdf4;
+  border-left: 3px solid $green;
+  border-radius: 0 6px 6px 0;
+  font-size: .78rem;
+  color: darken($green, 5%);
+  line-height: 1.4;
+  .reason-label { font-weight: 700; }
+}
+
+// ── Add contract form ─────────────────────────────────────────────────────────
+.add-form-wrap {
+  margin-top: 1rem;
+  padding: 1.1rem 1.25rem;
+  background: #fafafa;
+  border: 1px dashed $slate-200;
+  border-radius: 10px;
+  animation: slideUp .25s ease;
+
+  h4 { margin: 0 0 .3rem; font-size: .9rem; font-weight: 700; color: $slate-900; }
+  .add-form-hint { margin: 0 0 .9rem; font-size: .8rem; color: $slate-500; }
+}
+
+.add-form {
+  display: flex;
+  flex-direction: column;
+  gap: .65rem;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: .65rem;
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+
+  &--full { grid-column: 1 / -1; }
+
+  label {
+    font-size: .72rem;
+    font-weight: 600;
+    color: $slate-500;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    .req { color: $red; }
+    .hint { font-weight: 400; text-transform: none; color: $slate-400; letter-spacing: 0; }
+  }
+
+  input[type="text"], input:not([type="checkbox"]) {
+    padding: .5rem .75rem;
+    font-size: .875rem;
+    border: 1px solid $slate-200;
+    border-radius: 7px;
+    background: #fff;
+    color: $slate-900;
+    outline: none;
+    &:focus { border-color: $blue; box-shadow: 0 0 0 2px rgba(37,99,235,.1); }
+  }
+}
+
+.form-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: .5rem;
+  margin-top: .25rem;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  font-size: .8rem;
+  color: $slate-600;
+  cursor: pointer;
+  input[type="checkbox"] { width: 14px; height: 14px; cursor: pointer; }
+}
+
+.btn-submit {
+  padding: .5rem 1.1rem;
+  font-size: .875rem;
+  font-weight: 600;
+  background: #6366f1;
+  color: #fff;
+  border: none;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background .15s;
+  &:hover:not(:disabled) { background: #4f46e5; }
+  &:disabled { opacity: .55; cursor: default; }
+}
+
+.add-success {
+  font-size: .8rem; font-weight: 600; color: $green;
+  padding: .4rem .6rem; background: $green-bg; border-radius: 6px;
+}
+.add-error {
+  font-size: .8rem; color: $red;
+  padding: .4rem .6rem; background: $red-bg; border-radius: 6px;
+}
+
+// ── Service selection in AI panel ─────────────────────────────────────────────
+.selection-summary {
+  font-size: .72rem; font-weight: 600;
+  background: #e0e7ff; color: #3730a3;
+  padding: .15rem .5rem; border-radius: 999px;
+  text-transform: none; letter-spacing: 0;
+}
+
+.service-card--selected {
+  border-color: #6366f1;
+  background: #f5f3ff;
+}
+
+.service-card-top {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  margin-bottom: .25rem;
+}
+
+.service-action-tag {
+  font-size: .72rem; font-family: monospace;
+  background: #e0e7ff; color: #3730a3;
+  padding: .1rem .4rem; border-radius: 4px;
+}
+
+.service-reason {
+  font-size: .78rem; color: darken($green, 5%);
+  background: #f0fdf4; border-left: 2px solid $green;
+  padding: .3rem .5rem; border-radius: 0 5px 5px 0;
+  margin-top: .35rem; line-height: 1.4;
+}
+
 // ── Query card ────────────────────────────────────────────────────────────────
 .query-card {
   background: #fff;

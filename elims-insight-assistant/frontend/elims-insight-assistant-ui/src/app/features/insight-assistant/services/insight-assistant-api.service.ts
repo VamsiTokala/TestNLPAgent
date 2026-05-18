@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { AssistantQueryResponse } from '../models/assistant-query-response.model';
+import { ServiceContractEntry } from '../models/service-contract.model';
 
 @Injectable({ providedIn: 'root' })
 export class InsightAssistantApiService {
@@ -16,5 +17,13 @@ export class InsightAssistantApiService {
         legalEntities: ['EU', 'US']
       }
     });
+  }
+
+  getContracts(): Observable<ServiceContractEntry[]> {
+    return this.http.get<ServiceContractEntry[]>('/api/assistant/contracts');
+  }
+
+  registerContract(entry: ServiceContractEntry): Observable<ServiceContractEntry[]> {
+    return this.http.post<ServiceContractEntry[]>('/api/assistant/contracts', entry);
   }
 }

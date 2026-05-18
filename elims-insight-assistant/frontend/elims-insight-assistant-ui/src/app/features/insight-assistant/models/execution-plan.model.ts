@@ -9,6 +9,7 @@ export interface PlanOperation {
   action: string;
   select: string[];
   filters: PlanFilter[];
+  reason: string | null;
 }
 
 export interface PlanLimits {

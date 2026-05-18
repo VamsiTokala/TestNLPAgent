@@ -3,9 +3,13 @@ using ElimsInsightAssistant.Api.Execution;
 using ElimsInsightAssistant.Api.Services;
 using ElimsInsightAssistant.Api.Validation;
 
+// Service registry must be registered before plan generators and validators
+// so they can all share the same singleton instance.
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
+builder.Services.AddSingleton<IServiceRegistry, InMemoryServiceRegistry>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 

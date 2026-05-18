@@ -6,6 +6,103 @@
     <p class="subtitle">Governed Natural-Language Analytics</p>
   </div>
 
+  <!-- ── Service Catalogue ───────────────────────────────────────────────── -->
+  <div class="catalogue-card">
+    <div class="catalogue-header">
+      <div class="catalogue-title-group">
+        <span class="catalogue-icon">⬡</span>
+        <h3>Service Catalogue</h3>
+        <span class="catalogue-count">{{ contracts.length }} contract{{ contracts.length !== 1 ? 's' : '' }} registered</span>
+        <span class="catalogue-selected" *ngIf="response?.status === 'Completed'">
+          · {{ selectedCount() }} of {{ contracts.length }} selected by AI
+        </span>
+      </div>
+      <button class="btn-add" (click)="showAddForm = !showAddForm">
+        {{ showAddForm ? '✕ Cancel' : '+ Register Contract' }}
+      </button>
+    </div>
+
+    <!-- Contract cards -->
+    <div class="contracts-grid">
+      <div *ngFor="let c of contracts"
+           class="contract-card"
+           [ngClass]="{
+             'contract-card--selected':     isServiceSelected(c.name),
+             'contract-card--unselected':   response?.status === 'Completed' && !isServiceSelected(c.name),
+             'contract-card--required':     c.isRequired
+           }">
+        <div class="contract-card-header">
+          <div class="contract-name-group">
+            <span class="contract-name">{{ c.name }}</span>
+            <span class="contract-required-tag" *ngIf="c.isRequired">required</span>
+            <span class="contract-optional-tag" *ngIf="!c.isRequired">optional</span>
+          </div>
+          <span class="contract-selected-badge" *ngIf="isServiceSelected(c.name)">✓ Selected</span>
+        </div>
+
+        <div class="contract-action">→ {{ c.action }}</div>
+        <div class="contract-description">{{ c.description }}</div>
+
+        <div class="contract-fields">
+          <span class="field-chip" *ngFor="let f of c.fields">{{ f }}</span>
+        </div>
+
+        <!-- AI selection reason (shown after query runs) -->
+        <div class="contract-reason" *ngIf="getServiceReason(c.name) as reason">
+          <span class="reason-label">✦ AI reason:</span> {{ reason }}
+        </div>
+      </div>
+    </div>
+
+    <!-- Add contract form -->
+    <div class="add-form-wrap" *ngIf="showAddForm">
+      <h4>Register New Service Contract</h4>
+      <p class="add-form-hint">
+        Once registered, this contract is immediately added to the AI prompt.
+        The AI will consider it when answering future queries.
+      </p>
+      <form [formGroup]="addForm" (ngSubmit)="submitAddForm()" class="add-form">
+        <div class="form-row">
+          <div class="form-field">
+            <label>Service Name <span class="req">*</span></label>
+            <input formControlName="name" placeholder="e.g. sample-service" />
+          </div>
+          <div class="form-field">
+            <label>Display Name <span class="req">*</span></label>
+            <input formControlName="displayName" placeholder="e.g. Sample Service" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-field">
+            <label>Action <span class="req">*</span></label>
+            <input formControlName="action" placeholder="e.g. listSamples" />
+          </div>
+          <div class="form-field">
+            <label>Fields <span class="req">*</span> <span class="hint">(comma-separated)</span></label>
+            <input formControlName="fieldsRaw" placeholder="e.g. sampleId, studyId, status, collectedAt" />
+          </div>
+        </div>
+        <div class="form-field form-field--full">
+          <label>Purpose for AI <span class="req">*</span> <span class="hint">(injected into the AI prompt)</span></label>
+          <input formControlName="purpose" placeholder="e.g. Provides sample collection records and collection timestamps" />
+        </div>
+        <div class="form-field form-field--full">
+          <label>Description <span class="hint">(shown in UI — defaults to Purpose if blank)</span></label>
+          <input formControlName="description" placeholder="e.g. Sample collection catalogue — collection timestamps, status, and study linkage" />
+        </div>
+        <div class="form-footer">
+          <label class="checkbox-label">
+            <input type="checkbox" formControlName="isRequired" />
+            Required in every plan (adds to validator required-services check)
+          </label>
+          <button type="submit" class="btn-submit" [disabled]="addForm.invalid">Register Contract</button>
+        </div>
+        <div class="add-success" *ngIf="addSuccess">✓ Contract registered — AI prompt updated</div>
+        <div class="add-error" *ngIf="addError">{{ addError }}</div>
+      </form>
+    </div>
+  </div>
+
   <!-- ── Query card ──────────────────────────────────────────────────────── -->
   <div class="query-card">
     <label>Ask eLIMS</label>
@@ -18,18 +115,16 @@
     </div>
     <div class="quick-links">
       <span class="ql-label">Try:</span>
-      <button class="chip" *ngFor="let ex of examples" (click)="setQuery(ex)" [disabled]="isLoading">
-        {{ ex }}
-      </button>
+      <button class="chip" *ngFor="let ex of examples" (click)="setQuery(ex)" [disabled]="isLoading">{{ ex }}</button>
     </div>
   </div>
 
-  <!-- ── Loading state ───────────────────────────────────────────────────── -->
+  <!-- ── Loading ─────────────────────────────────────────────────────────── -->
   <div class="loading-card" *ngIf="isLoading">
     <div class="loading-dots"><span></span><span></span><span></span></div>
     <div class="loading-text">
       <strong>AI is analyzing your query</strong>
-      <span>Generating governed execution plan&hellip;</span>
+      <span>Identifying relevant service contracts&hellip;</span>
     </div>
   </div>
 
@@ -42,9 +137,8 @@
   <!-- ── Response ────────────────────────────────────────────────────────── -->
   <ng-container *ngIf="response && !isLoading">
 
-    <!-- ── AI Interpretation panel (shown for both Completed & Unsupported) -->
+    <!-- ── AI Interpretation panel ─────────────────────────────────────────── -->
     <div class="ai-panel" [ngClass]="{'ai-panel--unsupported': response.status !== 'Completed'}">
-
       <div class="ai-panel-header">
         <div class="ai-title-group">
           <span class="ai-spark">✦</span>
@@ -53,20 +147,19 @@
         <span class="provider-badge">{{ response.planGeneratorMode }}</span>
       </div>
 
-      <!-- Unsupported query path -->
+      <!-- Unsupported -->
       <div *ngIf="response.status !== 'Completed'" class="unsupported-body">
         <div class="unsupported-icon">⊘</div>
         <div>
           <strong>Query not supported</strong>
           <p>{{ response.message }}</p>
           <p class="unsupported-hint">
-            This assistant handles study completion timeliness and classification filtering.
-            Try: <em>"Show delayed studies"</em> or <em>"filter studies with classification Indeterminate"</em>.
+            Try: <em>"Show delayed studies"</em> or <em>"filter studies with classification Indeterminate"</em>
           </p>
         </div>
       </div>
 
-      <!-- Completed path — full reasoning breakdown -->
+      <!-- Completed -->
       <div *ngIf="response.status === 'Completed'" class="ai-panel-body">
 
         <!-- Intent -->
@@ -75,7 +168,7 @@
           <div class="intent-badge">{{ response.jsonPlan.intent }}</div>
         </div>
 
-        <!-- Classification filter + Services (side by side on wider screens) -->
+        <!-- Classification filter + Services side-by-side -->
         <div class="ai-cols">
 
           <div class="ai-section">
@@ -84,30 +177,39 @@
               <div *ngFor="let c of allClassifications"
                    class="filter-row"
                    [ngClass]="isClassificationIncluded(c) ? 'filter-row--active' : 'filter-row--inactive'">
-                <span class="filter-indicator" [ngClass]="classificationBadgeClass(c)"></span>
+                <span class="filter-indicator" [ngClass]="c | lowercase | slice:0:100"
+                      [style.background]="c === 'On Time' ? '#16a34a' : c === 'Delayed' ? '#dc2626' : '#d97706'"></span>
                 <span class="filter-name">{{ c }}</span>
-                <span class="filter-tag" *ngIf="isClassificationIncluded(c)">included</span>
+                <span class="filter-tag"          *ngIf=" isClassificationIncluded(c)">included</span>
                 <span class="filter-tag filter-tag--excluded" *ngIf="!isClassificationIncluded(c)">excluded</span>
               </div>
             </div>
           </div>
 
           <div class="ai-section">
-            <div class="ai-label">Services Requested</div>
+            <div class="ai-label">
+              Service Contract Selection
+              <span class="selection-summary">
+                {{ response.jsonPlan.operations.length }} of {{ contracts.length }} selected
+              </span>
+            </div>
             <div class="services-pipeline">
               <ng-container *ngFor="let op of response.jsonPlan.operations; let last = last">
-                <div class="service-card">
-                  <div class="service-name">{{ op.service }}</div>
-                  <div class="service-action">→ {{ op.action }}</div>
-                  <div class="service-fields">
+                <div class="service-card service-card--selected">
+                  <div class="service-card-top">
+                    <span class="service-name">{{ op.service }}</span>
+                    <span class="service-action-tag">{{ op.action }}</span>
+                  </div>
+                  <div class="service-reason" *ngIf="op.reason">{{ op.reason }}</div>
+                  <div class="service-filters" *ngIf="op.filters.length > 0">
                     <span *ngFor="let f of op.filters" class="service-filter-chip">
                       {{ f.field }} {{ f.op }} {{ f.value }}
                     </span>
                   </div>
                 </div>
                 <div class="pipeline-connector" *ngIf="!last">
-                  <span>⊕</span>
-                  <span class="pipeline-join-label">JOIN studyId</span>
+                  <span class="join-icon">⊕</span>
+                  <span class="join-label">JOIN studyId</span>
                 </div>
               </ng-container>
             </div>
@@ -115,7 +217,7 @@
 
         </div>
 
-        <!-- Validation checks -->
+        <!-- Validation -->
         <div class="ai-section">
           <div class="ai-label">
             Validation
@@ -127,8 +229,7 @@
             <div *ngFor="let check of response.validation.checks"
                  class="check-pill"
                  [ngClass]="check.status === 'Passed' ? 'check-pill--pass' : 'check-pill--fail'">
-              <span>{{ check.status === 'Passed' ? '✓' : '✗' }}</span>
-              {{ check.name }}
+              <span>{{ check.status === 'Passed' ? '✓' : '✗' }}</span>{{ check.name }}
             </div>
           </div>
         </div>
@@ -158,17 +259,11 @@
         <h4>Results</h4>
         <span class="count-badge">{{ response.results.length }}</span>
       </div>
-
       <table class="results-table" *ngIf="response.results.length > 0; else noResults">
         <thead>
           <tr>
-            <th>Study Code</th>
-            <th>Customer</th>
-            <th>Planned</th>
-            <th>Actual</th>
-            <th>Classification</th>
-            <th>Reason</th>
-            <th>Flags</th>
+            <th>Study Code</th><th>Customer</th><th>Planned</th>
+            <th>Actual</th><th>Classification</th><th>Reason</th><th>Flags</th>
           </tr>
         </thead>
         <tbody>
@@ -186,13 +281,10 @@
                 }">{{ r.classification }}</span>
             </td>
             <td>{{ r.reason }}</td>
-            <td>
-              <span class="flag-chip" *ngFor="let f of r.dataQualityFlags">{{ f }}</span>
-            </td>
+            <td><span class="flag-chip" *ngFor="let f of r.dataQualityFlags">{{ f }}</span></td>
           </tr>
         </tbody>
       </table>
-
       <ng-template #noResults>
         <div class="empty-state">No results match the current filter.</div>
       </ng-template>

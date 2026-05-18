@@ -13,8 +13,29 @@ public class AssistantController(
     IPlanGenerator planGenerator,
     IPlanValidator validator,
     IExecutionEngine executionEngine,
-    IAuditService auditService) : ControllerBase
+    IAuditService auditService,
+    IServiceRegistry serviceRegistry) : ControllerBase
 {
+    [HttpGet("contracts")]
+    public IActionResult GetContracts() => Ok(serviceRegistry.GetAll());
+
+    [HttpPost("contracts")]
+    public IActionResult RegisterContract([FromBody] ServiceContractEntry entry)
+    {
+        if (string.IsNullOrWhiteSpace(entry.Name))
+            return BadRequest("Name is required.");
+        if (string.IsNullOrWhiteSpace(entry.Action))
+            return BadRequest("Action is required.");
+        if (entry.Fields == null || entry.Fields.Count == 0)
+            return BadRequest("At least one field is required.");
+        if (string.IsNullOrWhiteSpace(entry.Purpose))
+            return BadRequest("Purpose is required (used in AI prompt).");
+
+        serviceRegistry.Register(entry);
+        return Ok(serviceRegistry.GetAll());
+    }
+
+
     [HttpPost("query")]
     public async Task<ActionResult<AssistantQueryResponse>> Query([FromBody] NaturalLanguageQueryRequest request)
     {
