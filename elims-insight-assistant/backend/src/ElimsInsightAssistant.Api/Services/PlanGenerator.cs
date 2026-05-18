@@ -120,8 +120,8 @@ public class MockPlanGenerator(IServiceRegistry registry) : IPlanGenerator
     [
         "not completed on time", "delayed studies", "completed late", "not on time",
         "indeterminate", "classification indeterminate", "classification delayed",
-        "classification on time", "filter studies", "show delayed", "show indeterminate",
-        "show on time", "show all studies"
+        "classification on time", "filter studies with classification",
+        "show delayed", "show indeterminate", "show on time", "show all studies"
     ];
 
     public Task<PlanGeneratorResult> GenerateAsync(string query)
@@ -187,15 +187,20 @@ Read-only, deterministic, approved service contracts only.
             (q.Contains("on time") && q.Contains("delayed") && q.Contains("indeterminate")))
             return ["On Time", "Delayed", "Indeterminate"];
 
-        bool wantsDelayed       = q.Contains("delayed") || q.Contains("completed late") ||
-                                  q.Contains("not on time") || q.Contains("not completed on time");
-        bool wantsIndeterminate = q.Contains("indeterminate");
-        bool wantsOnTime        = q.Contains("on time") && !wantsDelayed;
+        // "not on time" / "not completed on time" means the user wants all non-on-time studies.
+        // Keep this separate so "on time" is not treated as a positive request in those phrases.
+        bool notOnTime = q.Contains("not on time") || q.Contains("not completed on time");
 
-        if (wantsOnTime       && !wantsDelayed && !wantsIndeterminate) return ["On Time"];
-        if (wantsDelayed      && !wantsIndeterminate)                  return ["Delayed"];
-        if (wantsIndeterminate && !wantsDelayed)                       return ["Indeterminate"];
-        return ["Delayed", "Indeterminate"];
+        bool wantsOnTime        = q.Contains("on time") && !notOnTime;
+        bool wantsDelayed       = q.Contains("delayed") || q.Contains("completed late") || notOnTime;
+        bool wantsIndeterminate = q.Contains("indeterminate") || notOnTime;
+
+        var result = new List<string>(3);
+        if (wantsOnTime)        result.Add("On Time");
+        if (wantsDelayed)       result.Add("Delayed");
+        if (wantsIndeterminate) result.Add("Indeterminate");
+
+        return result.Count > 0 ? result : ["Delayed", "Indeterminate"];
     }
 }
 
