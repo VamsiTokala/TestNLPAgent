@@ -6,6 +6,7 @@ import { AssistantQueryResponse } from './models/assistant-query-response.model'
 import { ServiceContractEntry } from './models/service-contract.model';
 
 @Component({
+  standalone: true,
   selector: 'app-insight-assistant',
   templateUrl: './insight-assistant.component.html',
   styleUrls: ['./insight-assistant.component.scss'],
