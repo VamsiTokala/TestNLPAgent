@@ -2292,7 +2292,179 @@ run against the code directly in-process.
 
 ---
 
-## Part 15 — UI Screens
+## Part 15 — Testing Both Modes and Switching Providers
+
+### 15.1 — How the two modes differ
+
+| | Mock mode (no key) | Real mode (OpenAI key set) |
+|---|---|---|
+| **How it works** | Keyword matching in code | GPT-4o-mini generates a structured JSON plan |
+| **Startup log** | `warn: MockPlanGenerator` | `info: OpenAiPlanGenerator` |
+| **Cost** | Free — no API call made | ~$0.15 per million tokens (~300 tokens per query) |
+| **Queries that work** | Only the 4 hardcoded phrases | Any natural language query |
+| **Response time** | ~5 ms | ~1–3 seconds |
+| **Fails with** | Unrecognised query → `UnsupportedQuery` | Bad key → 503; no credits → 429 |
+| **Good for** | Local dev, CI, demos | Real NLP testing, production |
+
+### 15.2 — How to test mock mode
+
+Mock mode requires no key — just make sure no `OpenAI:ApiKey` is set:
+
+```bash
+# Confirm no key is stored in User Secrets
+cd elims-insight-assistant/backend/src/ElimsInsightAssistant.Api
+dotnet user-secrets list
+```
+
+If the key appears, remove it:
+
+```bash
+dotnet user-secrets remove "OpenAI:ApiKey"
+```
+
+Start the backend — you must see the `warn` line:
+
+```
+warn: Plan generator: MockPlanGenerator (keyword matching only — no real NLP).
+```
+
+**Test queries that work in mock mode** (exact phrases, case-insensitive):
+
+```
+Find studies not completed on time  ✓
+Show delayed studies                ✓
+Show indeterminate studies          ✓
+Show completed late studies         ✓
+```
+
+**Test that unrecognised queries are handled gracefully:**
+
+```powershell
+Invoke-RestMethod -Uri http://localhost:5000/api/assistant/query `
+  -Method Post -ContentType "application/json" `
+  -Body '{"query":"something random","userContext":{"userId":"u1","roles":["StudyViewer","CoreLabsViewer"],"legalEntities":["EU"]}}'
+```
+
+Expected response: `"status": "UnsupportedQuery"` — not a crash, not a 500.
+
+### 15.3 — How to test real (OpenAI) mode
+
+Set the key, restart, confirm the `info` line appears:
+
+```bash
+dotnet user-secrets set "OpenAI:ApiKey" "sk-proj-..."
+dotnet run --urls http://localhost:5000
+```
+
+Expected startup:
+```
+info: Plan generator: OpenAiPlanGenerator (gpt-4o-mini, structured outputs)
+```
+
+**Test with free-text queries that mock mode cannot handle:**
+
+```
+Which studies missed their deadline?
+Show me overdue trials
+Find studies that finished after the planned date
+Any studies with missing completion data?
+```
+
+All of these should return `"status": "Completed"` with real results — the LLM
+extracts the intent and maps it to the same execution plan structure.
+
+**Test the 503 path (transient error handling):**
+
+Set an invalid key to force an auth failure:
+```bash
+dotnet user-secrets set "OpenAI:ApiKey" "sk-invalid"
+dotnet run --urls http://localhost:5000
+```
+
+Send any query — you should get HTTP 503:
+```json
+{ "status": "ServiceUnavailable", "message": "Plan generation service is temporarily unavailable. Please try again." }
+```
+
+The full error (401 from OpenAI) is in the server terminal, not in the response.
+Reset to your real key or remove it to restore normal operation.
+
+### 15.4 — How to switch between modes at runtime
+
+You do not need to change any code or rebuild. Just set or remove the secret and restart:
+
+```bash
+# Switch TO real mode
+dotnet user-secrets set "OpenAI:ApiKey" "sk-proj-..."
+
+# Switch TO mock mode
+dotnet user-secrets remove "OpenAI:ApiKey"
+
+# Then restart the backend — mode is chosen once at startup
+dotnet run --urls http://localhost:5000
+```
+
+The startup log always tells you which mode is active — there is no silent fallback.
+
+### 15.5 — How to migrate to a different LLM provider
+
+The app is designed so only one file needs to change to swap providers:
+`Services/PlanGenerator.cs`.
+
+The interface `IPlanGenerator` stays the same regardless of provider:
+
+```csharp
+public interface IPlanGenerator {
+    Task<PlanGeneratorResult> GenerateAsync(string query);
+}
+```
+
+**To add Anthropic Claude as an alternative:**
+
+1. Add the Anthropic SDK:
+   ```bash
+   dotnet add package Anthropic.SDK
+   ```
+
+2. Create a new class `AnthropicPlanGenerator : IPlanGenerator` in `PlanGenerator.cs`
+   using the same structure as `OpenAiPlanGenerator` — prompt, parse JSON, return
+   `PlanGeneratorResult`.
+
+3. Update `Program.cs` to check for an Anthropic key and register accordingly:
+   ```csharp
+   var anthropicKey = builder.Configuration["Anthropic:ApiKey"];
+   var openAiKey    = builder.Configuration["OpenAI:ApiKey"];
+
+   if (!string.IsNullOrWhiteSpace(openAiKey))
+       builder.Services.AddSingleton<IPlanGenerator, OpenAiPlanGenerator>();
+   else if (!string.IsNullOrWhiteSpace(anthropicKey))
+       builder.Services.AddSingleton<IPlanGenerator, AnthropicPlanGenerator>();
+   else
+       builder.Services.AddSingleton<IPlanGenerator, MockPlanGenerator>();
+   ```
+
+4. Store the key:
+   ```bash
+   dotnet user-secrets set "Anthropic:ApiKey" "sk-ant-..."
+   ```
+
+The controller, validator, execution engine, and frontend all stay unchanged —
+they only know about `IPlanGenerator`, not which provider is behind it.
+
+**Provider comparison for this use case:**
+
+| Provider | Model to use | Structured outputs | Free tier |
+|---|---|---|---|
+| OpenAI (current) | gpt-4o-mini | `CreateJsonSchemaFormat` (strict) | No — $5 min |
+| Anthropic Claude | claude-haiku-4-5 | Tool use / JSON mode | No — $5 min |
+| Google Gemini | gemini-2.0-flash | Response schema | Yes — free tier available |
+
+Gemini is worth considering if you want a free API for development — the free tier
+handles hundreds of queries per day at no cost.
+
+---
+
+## Part 16 — UI Screens
 
 > These show what you see at `http://localhost:4200` after running `npm install && npx ng serve`
 > with the backend running at `http://localhost:5000`.
@@ -2430,7 +2602,7 @@ Component binds response to template
 
 ---
 
-## Part 16 — Key Concepts Summary
+## Part 17 — Key Concepts Summary
 
 | Concept | What It Means | Where Used |
 |---|---|---|
