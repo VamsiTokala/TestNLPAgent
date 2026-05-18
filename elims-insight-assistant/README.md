@@ -149,7 +149,7 @@ See `docs/build-from-scratch.md §Part 15` for annotated screen-by-screen walkth
 | 200 `status: Completed` | Success | Display results |
 | 200 `status: UnsupportedQuery` | Query out of scope | Show message to user, do not retry |
 | 400 | Plan failed allowlist validation | Fix the plan |
-| 503 `status: ServiceUnavailable` | OpenAI unavailable (network/outage) | Retry with backoff |
+| 503 `status: ServiceUnavailable` | LLM provider unavailable (network/outage) | Retry with backoff |
 
 Raw exception details are **never** in HTTP responses — they are logged server-side only.
 
@@ -160,7 +160,7 @@ elims-insight-assistant/
 ├── backend/src/
 │   ├── ElimsInsightAssistant.Api/
 │   │   ├── Controllers/     HTTP entry points
-│   │   ├── Services/        Plan generation (Mock + OpenAI), classification, data clients
+│   │   ├── Services/        Plan generation (Gemini, OpenAI, Mock), classification, data clients
 │   │   ├── Validation/      Allowlist validator
 │   │   ├── Execution/       Execution engine
 │   │   ├── Audit/           In-memory audit store
@@ -179,7 +179,7 @@ elims-insight-assistant/
 
 ## Why the AI Does Not Execute Directly
 
-OpenAI (or any LLM) only proposes a JSON plan. Before any data is fetched:
+The LLM (Gemini, OpenAI, or none in mock mode) only proposes a JSON plan. Before any data is fetched:
 - The plan is checked against a strict allowlist (services, fields, operators)
 - The user's roles and legal entities are verified
 - Write operations are unconditionally blocked
