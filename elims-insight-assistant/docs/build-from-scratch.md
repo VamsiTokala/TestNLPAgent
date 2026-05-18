@@ -1339,8 +1339,7 @@ builder.Services.AddScoped<IExecutionEngine,      ExecutionEngine>();
 
 var app = builder.Build();
 
-// Log which generator is active so developers always know the mode on startup.
-// There is no silent fallback — the warning is intentional.
+// Log active mode clearly at startup so there is no silent fallback to mock
 var logger = app.Services.GetRequiredService<ILogger<Program>>();
 if (!string.IsNullOrWhiteSpace(openAiKey))
     logger.LogInformation("Plan generator: OpenAiPlanGenerator (gpt-4o-mini, structured outputs)");
@@ -1350,11 +1349,8 @@ else
         "To enable real NL intent extraction set OpenAI:ApiKey. " +
         "See docs/build-from-scratch.md §14.1 for how to obtain and configure a key.");
 
-// Configure the HTTP pipeline
 app.UseSwagger();
 app.UseSwaggerUI();
-app.UseAuthentication();
-app.UseAuthorization();
 app.MapControllers();
 app.Run();
 ```
