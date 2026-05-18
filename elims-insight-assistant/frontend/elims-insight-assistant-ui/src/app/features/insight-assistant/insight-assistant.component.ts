@@ -19,6 +19,7 @@ export class InsightAssistantComponent {
   ];
 
   response: AssistantQueryResponse | null = null;
+  error: string | null = null;
   form: FormGroup;
 
   get queryControl(): FormControl { return this.form.get('query') as FormControl; }
@@ -31,9 +32,14 @@ export class InsightAssistantComponent {
   }
 
   runQuery(): void {
-    this.api.query(this.form.value.query || '').subscribe(
-      (r: AssistantQueryResponse) => { this.response = r; }
-    );
+    this.error = null;
+    this.response = null;
+    this.api.query(this.form.value.query || '').subscribe({
+      next: (r: AssistantQueryResponse) => { this.response = r; },
+      error: (err) => {
+        this.error = err?.error?.errors?.join(', ') ?? err?.error?.title ?? 'An unexpected error occurred. Please try again.';
+      }
+    });
   }
 
   setQuery(q: string): void { this.form.patchValue({ query: q }); }

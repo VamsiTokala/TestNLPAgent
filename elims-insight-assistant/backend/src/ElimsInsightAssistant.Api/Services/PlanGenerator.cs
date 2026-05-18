@@ -160,6 +160,9 @@ If the query IS about study completion timeliness or classification filtering:
   - Write a clear markdown plan explaining the steps
   - Populate plan with version "1.0", intent "find_studies_not_completed_on_time", the two operations,
     output.includeClassifications set according to the rules above, and limits maxRows 500
+  - IMPORTANT: intent, entities, and operations MUST all be fully populated.
+    Never return an empty intent, empty entities array, or empty operations array when supported=true.
+    If you cannot determine the full plan, set supported=false instead.
 
 If the query is NOT about study completion timeliness:
   - Set supported = false
@@ -237,6 +240,17 @@ User query: {QUERY}
                 _logger.LogError("Gemini returned supported=true but plan deserialised to null. Raw: {Json}", json);
                 return new PlanGeneratorResult(string.Empty, null,
                     "Plan generation service returned an unexpected response.", IsServerError: true);
+            }
+
+            // Guard against Gemini returning a structurally incomplete plan despite supported=true.
+            // Treat it as an unsupported query rather than a server error — it's a model quality issue.
+            if (string.IsNullOrWhiteSpace(plan.Intent) || plan.Operations.Count == 0)
+            {
+                _logger.LogWarning(
+                    "Gemini returned supported=true with incomplete plan (intent='{Intent}', ops={Ops}). Treating as unsupported. Raw: {Json}",
+                    plan.Intent, plan.Operations.Count, json);
+                return new PlanGeneratorResult(string.Empty, null,
+                    "Query not supported by this assistant.");
             }
 
             return new PlanGeneratorResult(markdown, plan, null);
@@ -379,6 +393,9 @@ If the query IS about study completion timeliness or classification filtering:
   - Write a clear markdown plan explaining the steps
   - Populate plan with version "1.0", intent "find_studies_not_completed_on_time", the two operations,
     output.includeClassifications set according to the rules above, and limits maxRows 500
+  - IMPORTANT: intent, entities, and operations MUST all be fully populated.
+    Never return an empty intent, empty entities array, or empty operations array when supported=true.
+    If you cannot determine the full plan, set supported=false instead.
 
 If the query is NOT about study completion timeliness:
   - Set supported = false

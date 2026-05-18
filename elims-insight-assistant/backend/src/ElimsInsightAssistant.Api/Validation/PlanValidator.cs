@@ -19,12 +19,35 @@ public class PlanValidator : IPlanValidator
     private static readonly HashSet<string> AllowedAggs = ["max", "min", "count", "sum", "avg"];
     private static readonly string[] ForbiddenTokens = ["select ", " from ", "drop ", "script", "connectionstring", "update ", "delete ", "insert "];
 
+    private static readonly HashSet<string> RequiredServices = ["study-service", "corelabs-service"];
+    private static readonly HashSet<string> RequiredEntities = ["study", "testp"];
+
     public ValidationResult Validate(ExecutionPlan plan)
     {
         var checks = new List<ValidationCheck>();
         var errors = new List<string>();
 
-        foreach (var op in plan.Operations)
+        // Structural completeness — a partial plan from a confused LLM must not execute
+        if (string.IsNullOrWhiteSpace(plan.Intent))
+            errors.Add("Intent is required");
+
+        if (plan.Operations is null || plan.Operations.Count == 0)
+            errors.Add("Operations cannot be empty");
+
+        var presentServices = plan.Operations?.Select(o => o.Service).ToHashSet() ?? [];
+        foreach (var svc in RequiredServices.Where(s => !presentServices.Contains(s)))
+            errors.Add($"Required service missing: {svc}");
+
+        var presentEntities = plan.Entities ?? [];
+        foreach (var ent in RequiredEntities.Where(e => !presentEntities.Contains(e)))
+            errors.Add($"Required entity missing: {ent}");
+
+        checks.Add(new("Plan completeness",
+            errors.Any(e => e.Contains("Intent") || e.Contains("Operations") ||
+                            e.Contains("service missing") || e.Contains("entity missing"))
+                ? "Failed" : "Passed"));
+
+        foreach (var op in plan.Operations ?? [])
         {
             if (!Allowlist.ContainsKey(op.Service)) errors.Add($"Unapproved service: {op.Service}");
             else
@@ -48,7 +71,7 @@ public class PlanValidator : IPlanValidator
         if (plan.Limits is null || plan.Limits.MaxRows <= 0) errors.Add("Missing maxRows");
         else if (plan.Limits.MaxRows > 500) errors.Add("maxRows greater than 500");
 
-        checks.Add(new("Service allowlist", errors.Any(e => e.Contains("service")) ? "Failed" : "Passed"));
+        checks.Add(new("Service allowlist", errors.Any(e => e.Contains("Unapproved service")) ? "Failed" : "Passed"));
         checks.Add(new("Field allowlist", errors.Any(e => e.Contains("field")) ? "Failed" : "Passed"));
         checks.Add(new("Read-only execution", errors.Any(e => e.Contains("Write/update/delete")) ? "Failed" : "Passed"));
         checks.Add(new("Aggregation allowlist", errors.Any(e => e.Contains("aggregate")) ? "Failed" : "Passed"));

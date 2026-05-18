@@ -8,13 +8,21 @@
 <div>
   <button *ngFor="let ex of examples" (click)="setQuery(ex)">{{ ex }}</button>
 </div>
+<div *ngIf="error">
+  <p><strong>Error:</strong> {{ error }}</p>
+</div>
 <div *ngIf="response">
-  <h4>Summary</h4>
-  <p>On Time: {{response.summary.onTime}} | Delayed: {{response.summary.delayed}} | Indeterminate: {{response.summary.indeterminate}}</p>
-  <h4>Results</h4>
-  <pre>{{ response.results | json }}</pre>
-  <h4>Generated Plan</h4>
-  <pre>{{ response.markdownPlan }}</pre>
-  <h4>JSON Execution Plan</h4>
-  <pre>{{ response.jsonPlan | json }}</pre>
+  <ng-container *ngIf="response.status !== 'Completed'; else completedBlock">
+    <p><strong>Not supported:</strong> {{ response.message }}</p>
+  </ng-container>
+  <ng-template #completedBlock>
+    <h4>Summary</h4>
+    <p>On Time: {{response.summary.onTime}} | Delayed: {{response.summary.delayed}} | Indeterminate: {{response.summary.indeterminate}}</p>
+    <h4>Results</h4>
+    <pre>{{ response.results | json }}</pre>
+    <h4>Generated Plan</h4>
+    <pre>{{ response.markdownPlan }}</pre>
+    <h4>JSON Execution Plan</h4>
+    <pre>{{ response.jsonPlan | json }}</pre>
+  </ng-template>
 </div>
