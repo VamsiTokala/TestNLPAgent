@@ -227,31 +227,31 @@ public class GeminiPlanGenerator(IConfiguration config, IServiceRegistry registr
         var coreInstructions = PromptBuilder.CoreInstructions(contracts);
         var exampleOps = PromptBuilder.ExampleOperations(contracts);
 
-        return $"""
+        return $$"""
 You are a governed analytics plan generator for a laboratory information management system (LIMS).
 
-{coreInstructions}
+{{coreInstructions}}
 
 Respond ONLY with a JSON object matching this exact structure (no markdown fences, no extra keys):
-{{
+{
   "supported": true|false,
   "reason": null or "string",
   "markdown": null or "string",
-  "plan": null or {{
+  "plan": null or {
     "version": "1.0",
     "intent": "find_studies_not_completed_on_time",
     "entities": ["study","testp"],
     "operations": [
-{exampleOps}
+{{exampleOps}}
     ],
-    "output": {{
+    "output": {
       "includeClassifications": ["Delayed", "Indeterminate"]
-    }},
-    "limits": {{ "maxRows": 500, "pagination": false }}
-  }}
-}}
+    },
+    "limits": { "maxRows": 500, "pagination": false }
+  }
+}
 
-User query: {query}
+User query: {{query}}
 """;
     }
 
