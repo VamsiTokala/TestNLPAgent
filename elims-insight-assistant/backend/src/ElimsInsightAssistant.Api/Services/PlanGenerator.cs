@@ -257,9 +257,10 @@ User query: {{query}}
 
     public async Task<PlanGeneratorResult> GenerateAsync(string query)
     {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
         try
         {
-            var response = await _model.GenerateContent(BuildPrompt(query));
+            var response = await _model.GenerateContent(BuildPrompt(query), cancellationToken: cts.Token);
             var raw = response.Text ?? string.Empty;
 
             var json = raw.Trim();
@@ -303,6 +304,12 @@ User query: {{query}}
             logger.LogError(ex, "Gemini response failed JSON parse for query: {Query}", query);
             return new PlanGeneratorResult(string.Empty, null,
                 "Plan generation service returned an unreadable response.", IsServerError: true);
+        }
+        catch (OperationCanceledException)
+        {
+            logger.LogWarning("Gemini call timed out after 45s for query: {Query}", query);
+            return new PlanGeneratorResult(string.Empty, null,
+                "Plan generation timed out. Gemini free tier can be slow — please try again.", IsServerError: true);
         }
         catch (Exception ex)
         {
