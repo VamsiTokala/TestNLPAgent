@@ -37,6 +37,32 @@ public class ApiContractTests
         }
     }
 
+    [Theory]
+    [InlineData("show on time and delayed studies",        new[] { "On Time", "Delayed" })]
+    [InlineData("show on time and indeterminate studies",  new[] { "On Time", "Indeterminate" })]
+    [InlineData("show delayed and indeterminate studies",  new[] { "Delayed", "Indeterminate" })]
+    [InlineData("show on time studies",                    new[] { "On Time" })]
+    [InlineData("show delayed studies",                    new[] { "Delayed" })]
+    [InlineData("show indeterminate studies",              new[] { "Indeterminate" })]
+    [InlineData("show me studies not completed on time",   new[] { "Delayed", "Indeterminate" })]
+    [InlineData("find studies not on time",                new[] { "Delayed", "Indeterminate" })]
+    public async Task MockGenerator_ResolvesTwoClassificationCombinations(string query, string[] expected)
+    {
+        var result = await _generator.GenerateAsync(query);
+        Assert.NotNull(result.Plan);
+        Assert.Equal(expected, result.Plan!.Output.IncludeClassifications.ToArray());
+    }
+
+    [Theory]
+    [InlineData("filter studies by customer")]
+    [InlineData("filter studies by legalEntity")]
+    public async Task MockGenerator_RejectsNonClassificationFilterQueries(string query)
+    {
+        var result = await _generator.GenerateAsync(query);
+        Assert.Null(result.Plan);
+        Assert.NotNull(result.Error);
+    }
+
     [Fact]
     public void PlanGeneratorResult_IsServerError_DefaultsFalse()
     {
