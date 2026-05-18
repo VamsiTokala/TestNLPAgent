@@ -40,6 +40,6 @@ else
     logger.LogWarning(
         "Plan generator: MockPlanGenerator (keyword matching only — no real NLP). " +
         "To enable real NL intent extraction set Gemini:ApiKey (free tier) or OpenAI:ApiKey. " +
-        "See docs/build-from-scratch.md §14.1 for how to obtain and configure a key.");
+        "See docs/build-from-scratch.md Step 14.1 for how to obtain and configure a key.");
 
 app.Run();
