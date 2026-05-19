@@ -16,9 +16,6 @@ public class PlanValidator(IServiceRegistry registry) : IPlanValidator
     private static readonly string[] ForbiddenTokens =
         ["select ", " from ", "drop ", "script", "connectionstring", "update ", "delete ", "insert "];
 
-    // Entities are domain concepts, not tied 1-to-1 to service names
-    private static readonly HashSet<string> RequiredEntities = ["study", "testp"];
-
     public ValidationResult Validate(ExecutionPlan plan)
     {
         var contracts = registry.GetAll();
@@ -41,13 +38,9 @@ public class PlanValidator(IServiceRegistry registry) : IPlanValidator
         foreach (var svc in requiredServices.Where(s => !presentServices.Contains(s)))
             errors.Add($"Required service missing: {svc}");
 
-        var presentEntities = plan.Entities ?? [];
-        foreach (var ent in RequiredEntities.Where(e => !presentEntities.Contains(e)))
-            errors.Add($"Required entity missing: {ent}");
-
         checks.Add(new("Plan completeness",
             errors.Any(e => e.Contains("Intent") || e.Contains("Operations") ||
-                            e.Contains("service missing") || e.Contains("entity missing"))
+                            e.Contains("service missing"))
                 ? "Failed" : "Passed"));
 
         foreach (var op in plan.Operations ?? [])
