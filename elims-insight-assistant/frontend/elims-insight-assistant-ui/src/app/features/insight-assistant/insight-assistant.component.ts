@@ -82,7 +82,7 @@ export class InsightAssistantComponent implements OnInit, OnDestroy {
     this.clearPipeTimers();
 
     const t1 = setTimeout(() => { if (this.isLoading && this.pipelineStep < 3) this.pipelineStep = 2; }, 700);
-    const tSlow = setTimeout(() => { if (this.isLoading && this.pipelineStep <= 2) this.slowWarning = true; }, 15000);
+    const tSlow = setTimeout(() => { if (this.isLoading && this.pipelineStep <= 2) this.slowWarning = true; }, 5000);
     this._pipeTimers.push(t1, tSlow);
 
     this.api.query(this.form.value.query || '', this.selectedProvider ?? undefined).pipe(timeout(55000)).subscribe({
