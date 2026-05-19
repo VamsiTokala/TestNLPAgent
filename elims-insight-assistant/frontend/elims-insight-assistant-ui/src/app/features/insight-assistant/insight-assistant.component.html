@@ -136,13 +136,118 @@
     </div>
   </div>
 
-  <!-- ── Loading ─────────────────────────────────────────────────────────── -->
-  <div class="loading-card" *ngIf="isLoading">
-    <div class="loading-dots"><span></span><span></span><span></span></div>
-    <div class="loading-text">
-      <strong>AI is analyzing your query</strong>
-      <span>Identifying relevant service contracts&hellip;</span>
+  <!-- ── Pipeline tracker ───────────────────────────────────────────────── -->
+  <div class="pipeline-tracker" *ngIf="pipelineStep > 0">
+
+    <!-- Step 1: Sending -->
+    <div class="ps" [ngClass]="psClass(1)">
+      <div class="ps-head">
+        <span class="ps-num">{{ psIsDone(1) ? '✓' : '①' }}</span>
+        <span class="ps-label">Sending query to AI provider</span>
+        <span class="ps-dots" *ngIf="psIsActive(1)"><span></span><span></span><span></span></span>
+        <span class="ps-badge ps-badge--provider" *ngIf="psIsDone(1) && response">
+          {{ response.planGeneratorMode }}
+        </span>
+      </div>
     </div>
+
+    <div class="ps-connector"></div>
+
+    <!-- Step 2: AI generating plan — reveals AI response when done -->
+    <div class="ps" [ngClass]="psClass(2)">
+      <div class="ps-head">
+        <span class="ps-num">{{ psIsDone(2) ? '✓' : '②' }}</span>
+        <span class="ps-label">AI generating execution plan</span>
+        <span class="ps-dots" *ngIf="psIsActive(2)"><span></span><span></span><span></span></span>
+        <span class="ps-badge ps-badge--ok"   *ngIf="psIsDone(2) && response?.status === 'Completed'">plan ready</span>
+        <span class="ps-badge ps-badge--warn" *ngIf="psIsDone(2) && response?.status !== 'Completed'">unsupported</span>
+      </div>
+
+      <!-- AI response detail -->
+      <div class="ps-detail" *ngIf="psIsDone(2) && response?.status === 'Completed'">
+        <div class="ps-row">
+          <span class="ps-tag">Intent</span>
+          <span class="ps-intent">{{ response?.jsonPlan?.intent }}</span>
+        </div>
+        <div class="ps-row">
+          <span class="ps-tag">Services selected</span>
+          <div class="ps-chips">
+            <span class="ps-svc-chip" *ngFor="let op of response?.jsonPlan?.operations">
+              <span class="ps-svc-name">{{ op.service }}</span>
+              <span class="ps-svc-reason" *ngIf="op.reason">{{ op.reason }}</span>
+            </span>
+          </div>
+        </div>
+        <div class="ps-row">
+          <span class="ps-tag">Classification filter</span>
+          <span *ngFor="let c of response?.jsonPlan?.output?.includeClassifications"
+                class="ps-cls-chip"
+                [ngClass]="classSlug(c)">{{ c }}</span>
+        </div>
+      </div>
+
+      <div class="ps-detail ps-detail--warn" *ngIf="psIsDone(2) && response?.status !== 'Completed'">
+        ⊘ {{ response?.message }}
+      </div>
+    </div>
+
+    <div class="ps-connector"></div>
+
+    <!-- Step 3: Validating -->
+    <div class="ps" [ngClass]="psClass(3)">
+      <div class="ps-head">
+        <span class="ps-num">{{ psIsDone(3) ? '✓' : '③' }}</span>
+        <span class="ps-label">Validating plan against allowlist</span>
+        <span class="ps-dots" *ngIf="psIsActive(3)"><span></span><span></span><span></span></span>
+        <span class="ps-badge ps-badge--ok"    *ngIf="psIsDone(3) && response?.status === 'Completed'">
+          {{ response?.validation?.checks?.length }} checks passed
+        </span>
+        <span class="ps-badge ps-badge--muted" *ngIf="psIsDone(3) && response?.status !== 'Completed'">skipped</span>
+      </div>
+    </div>
+
+    <div class="ps-connector"></div>
+
+    <!-- Step 4: Executing — reveals data received when done -->
+    <div class="ps" [ngClass]="psClass(4)">
+      <div class="ps-head">
+        <span class="ps-num">{{ psIsDone(4) ? '✓' : '④' }}</span>
+        <span class="ps-label">Executing against services</span>
+        <span class="ps-dots" *ngIf="psIsActive(4)"><span></span><span></span><span></span></span>
+        <span class="ps-badge ps-badge--ok"    *ngIf="psIsDone(4) && response?.status === 'Completed'">
+          {{ response?.results?.length }} rows returned
+        </span>
+        <span class="ps-badge ps-badge--muted" *ngIf="psIsDone(4) && response?.status !== 'Completed'">skipped</span>
+      </div>
+
+      <!-- Data received detail -->
+      <div class="ps-detail" *ngIf="psIsDone(4) && response?.status === 'Completed'">
+        <div class="ps-row">
+          <span class="ps-tag">Services called</span>
+          <span class="ps-called-chip" *ngFor="let op of response?.jsonPlan?.operations">
+            {{ op.service }} ✓
+          </span>
+        </div>
+        <div class="ps-row">
+          <span class="ps-tag">Summary</span>
+          <span class="ps-count on-time">On Time: {{ response?.summary?.onTime }}</span>
+          <span class="ps-count delayed">Delayed: {{ response?.summary?.delayed }}</span>
+          <span class="ps-count indeterminate">Indeterminate: {{ response?.summary?.indeterminate }}</span>
+        </div>
+        <div class="ps-row" *ngIf="response?.results && response!.results.length > 0">
+          <span class="ps-tag">Preview</span>
+          <span *ngFor="let r of response!.results | slice:0:3"
+                class="ps-result-chip"
+                [ngClass]="classSlug(r.classification)">
+            {{ r.studyCode }} · {{ r.classification }}
+          </span>
+          <span class="ps-more" *ngIf="response!.results.length > 3">
+            +{{ response!.results.length - 3 }} more
+          </span>
+        </div>
+      </div>
+    </div>
+
   </div>
 
   <!-- ── HTTP error ──────────────────────────────────────────────────────── -->
