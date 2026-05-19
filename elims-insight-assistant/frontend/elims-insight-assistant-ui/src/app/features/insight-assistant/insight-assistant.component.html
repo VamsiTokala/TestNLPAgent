@@ -145,6 +145,9 @@
         <span class="ps-num">{{ psIsDone(1) ? '✓' : '①' }}</span>
         <span class="ps-label">Sending query to AI provider</span>
         <span class="ps-dots" *ngIf="psIsActive(1)"><span></span><span></span><span></span></span>
+        <span class="ps-badge ps-badge--provider" *ngIf="psIsActive(1) && activeProviderName">
+          {{ activeProviderName }}
+        </span>
         <span class="ps-badge ps-badge--provider" *ngIf="psIsDone(1) && response">
           {{ response.planGeneratorMode }}
         </span>

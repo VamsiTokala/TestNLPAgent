@@ -46,6 +46,7 @@ export class InsightAssistantComponent implements OnInit, OnDestroy {
   private _pipeTimers: ReturnType<typeof setTimeout>[] = [];
 
   get queryControl(): FormControl { return this.form.get('query') as FormControl; }
+  get activeProviderName(): string { return this.providers.find(p => p.id === this.selectedProvider)?.name ?? ''; }
 
   constructor(private fb: FormBuilder, private api: InsightAssistantApiService) {
     this.form = this.fb.group({ query: ['Find studies not completed on time'] });
@@ -80,8 +81,8 @@ export class InsightAssistantComponent implements OnInit, OnDestroy {
     this.slowWarning = false;
     this.clearPipeTimers();
 
-    const t1 = setTimeout(() => { if (this.isLoading) this.pipelineStep = 2; }, 700);
-    const tSlow = setTimeout(() => { if (this.isLoading && this.pipelineStep === 2) this.slowWarning = true; }, 15000);
+    const t1 = setTimeout(() => { if (this.isLoading && this.pipelineStep < 3) this.pipelineStep = 2; }, 700);
+    const tSlow = setTimeout(() => { if (this.isLoading && this.pipelineStep <= 2) this.slowWarning = true; }, 15000);
     this._pipeTimers.push(t1, tSlow);
 
     this.api.query(this.form.value.query || '', this.selectedProvider ?? undefined).pipe(timeout(55000)).subscribe({
