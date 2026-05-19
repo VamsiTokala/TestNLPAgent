@@ -488,13 +488,13 @@ public class OpenRouterPlanGenerator(IConfiguration config, IServiceRegistry reg
 
     private readonly ChatClient _client = new ChatClient(
         config["OpenRouter:Model"] ?? "mistralai/mistral-7b-instruct",
-        new OpenAI.OpenAIClientOptions { Endpoint = new Uri("https://openrouter.ai/api/v1") },
         new System.ClientModel.ApiKeyCredential(
             config["OpenRouter:ApiKey"]
                 ?? throw new InvalidOperationException(
                     "OpenRouter:ApiKey is not configured. " +
                     "Set via: dotnet user-secrets set \"OpenRouter:ApiKey\" \"sk-or-...\" " +
-                    "or env var OpenRouter__ApiKey")));
+                    "or env var OpenRouter__ApiKey")),
+        new OpenAI.OpenAIClientOptions { Endpoint = new Uri("https://openrouter.ai/api/v1") });
 
     public async Task<PlanGeneratorResult> GenerateAsync(string query)
     {
