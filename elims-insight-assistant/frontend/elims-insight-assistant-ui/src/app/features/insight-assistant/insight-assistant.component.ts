@@ -1,11 +1,13 @@
 import { Component, OnInit } from '@angular/core';
 import { FormBuilder, FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { NgFor, NgIf, NgClass, JsonPipe, DatePipe, SlicePipe, LowerCasePipe } from '@angular/common';
+import { timeout, TimeoutError } from 'rxjs';
 import { InsightAssistantApiService } from './services/insight-assistant-api.service';
 import { AssistantQueryResponse } from './models/assistant-query-response.model';
 import { ServiceContractEntry } from './models/service-contract.model';
 
 @Component({
+  standalone: true,
   selector: 'app-insight-assistant',
   templateUrl: './insight-assistant.component.html',
   styleUrls: ['./insight-assistant.component.scss'],
@@ -57,10 +59,14 @@ export class InsightAssistantComponent implements OnInit {
     this.error = null;
     this.response = null;
     this.isLoading = true;
-    this.api.query(this.form.value.query || '').subscribe({
+    this.api.query(this.form.value.query || '').pipe(timeout(55000)).subscribe({
       next: (r: AssistantQueryResponse) => { this.response = r; this.isLoading = false; },
       error: (err) => {
-        this.error = err?.error?.errors?.join(', ') ?? err?.error?.title ?? 'An unexpected error occurred.';
+        if (err instanceof TimeoutError) {
+          this.error = 'Request timed out. Gemini free tier can be slow — please try again in a moment.';
+        } else {
+          this.error = err?.error?.message ?? err?.error?.errors?.join(', ') ?? err?.error?.title ?? 'An unexpected error occurred.';
+        }
         this.isLoading = false;
       }
     });

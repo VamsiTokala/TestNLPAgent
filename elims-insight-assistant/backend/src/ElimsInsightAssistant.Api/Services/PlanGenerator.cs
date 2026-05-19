@@ -232,12 +232,15 @@ You are a governed analytics plan generator for a laboratory information managem
 
 {{coreInstructions}}
 
-Respond ONLY with a JSON object matching this exact structure (no markdown fences, no extra keys):
+Respond ONLY with a valid JSON object — no markdown fences, no trailing text, no extra keys.
+Use this exact structure. For a supported query set supported=true and populate plan.
+For an unsupported query set supported=false, set reason, and set markdown and plan to null.
+
 {
-  "supported": true|false,
-  "reason": null or "string",
-  "markdown": null or "string",
-  "plan": null or {
+  "supported": true,
+  "reason": null,
+  "markdown": "string — markdown explanation of the plan steps",
+  "plan": {
     "version": "1.0",
     "intent": "find_studies_not_completed_on_time",
     "entities": ["study","testp"],
@@ -257,14 +260,22 @@ User query: {{query}}
 
     public async Task<PlanGeneratorResult> GenerateAsync(string query)
     {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
         try
         {
-            var response = await _model.GenerateContent(BuildPrompt(query));
+            var response = await _model.GenerateContent(BuildPrompt(query), cancellationToken: cts.Token);
             var raw = response.Text ?? string.Empty;
 
-            var json = raw.Trim();
-            if (json.StartsWith("```")) json = json[(json.IndexOf('\n') + 1)..];
-            if (json.EndsWith("```")) json = json[..json.LastIndexOf("```")].TrimEnd();
+            // Extract the JSON object — robust against markdown fences or any leading/trailing text
+            var startIdx = raw.IndexOf('{');
+            var endIdx   = raw.LastIndexOf('}');
+            if (startIdx < 0 || endIdx <= startIdx)
+            {
+                logger.LogError("Gemini response contained no JSON object. Raw: {Raw}", raw);
+                return new PlanGeneratorResult(string.Empty, null,
+                    "Plan generation service returned an unreadable response.", IsServerError: true);
+            }
+            var json = raw[startIdx..(endIdx + 1)];
 
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
@@ -303,6 +314,12 @@ User query: {{query}}
             logger.LogError(ex, "Gemini response failed JSON parse for query: {Query}", query);
             return new PlanGeneratorResult(string.Empty, null,
                 "Plan generation service returned an unreadable response.", IsServerError: true);
+        }
+        catch (OperationCanceledException)
+        {
+            logger.LogWarning("Gemini call timed out after 45s for query: {Query}", query);
+            return new PlanGeneratorResult(string.Empty, null,
+                "Plan generation timed out. Gemini free tier can be slow — please try again.", IsServerError: true);
         }
         catch (Exception ex)
         {
