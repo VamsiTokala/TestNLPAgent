@@ -4,8 +4,9 @@
 
 1. Start backend: `ASPNETCORE_ENVIRONMENT=Development dotnet run --urls http://localhost:5000`
 2. Start frontend: `npx ng serve` (http://localhost:4200)
-3. Confirm startup log shows `GeminiPlanGenerator` (or `MockPlanGenerator` if no key)
-4. Open Swagger: http://localhost:5000/swagger (keep in a tab for Step 6)
+3. Confirm startup log shows available generators, e.g.:
+   `info: Available plan generators: mock, openrouter`
+4. Open Swagger: http://localhost:5000/swagger (keep in a tab for Step 7)
 
 ---
 
@@ -15,11 +16,21 @@
 
 Before running any query, point to the **Service Catalogue** at the top of the page.
 
-- Two contract cards: **study-service** [required] and **corelabs-service** [required]
+- **Four** contract cards: **study-service** [required], **corelabs-service** [required],
+  **sample-service** [optional], **protocol-service** [optional]
 - Each card shows: service name (monospace), action, description, and field chips
-- Both are marked **required** — every plan must use both
+- Required services must appear in every valid plan; optional ones are selected by the AI only when relevant
 
-Key point: *"These cards are the AI's menu. It only knows about services listed here."*
+Key point: *"These cards are the AI's menu. It can only call services listed here — the validator blocks anything else."*
+
+---
+
+### 1b. Provider Selector (if multiple keys configured)
+
+If you have more than one AI key set, a **Provider Selector** appears in the query bar header.
+You can switch between Gemini / OpenAI / OpenRouter / Mock per-query without restarting.
+
+Key point: *"The governed plan pattern is identical regardless of which LLM generates the plan."*
 
 ---
 
@@ -33,9 +44,10 @@ Key point: *"These cards are the AI's menu. It only knows about services listed 
   - **Classification Filter** — Delayed ✓ included, Indeterminate ✓ included, On Time ✗ excluded
   - **Service Contract Selection** — both service cards shown with pipeline connector "⊕ JOIN studyId" and the AI's reason for each
   - **Validation** — all checks green
-- Service Catalogue cards above now show "✓ Selected" on both
-- Summary cards: **On Time: 2 | Delayed: 1 | Indeterminate: 1**
-- Results table shows ST-002 (Delayed) and ST-004 (Indeterminate)
+- Service Catalogue: **study-service** and **corelabs-service** show "✓ Selected";
+  **sample-service** and **protocol-service** are dimmed (not needed for this query)
+- Summary cards show counts across all 12 studies (On Time / Delayed / Indeterminate)
+- Results table shows all Delayed and Indeterminate studies
 
 Key point: *"The AI explains its reasoning for every service it selected. The classification filter is set by the LLM, not a dropdown."*
 
@@ -76,20 +88,20 @@ Key point: *"The UI never renders an empty plan — unsupported queries show a c
 
 - Click **+ Register Contract** in the Service Catalogue panel
 - Fill in:
-  - Service Name: `sample-service`
-  - Display Name: `Sample Service`
-  - Action: `listSamples`
-  - Fields: `sampleId, studyId, status, collectedAt`
-  - Purpose for AI: `Provides sample collection records and collection timestamps`
+  - Service Name: `adverse-event-service`
+  - Display Name: `Adverse Event Service`
+  - Action: `listAdverseEvents`
+  - Fields: `eventId, studyId, severity, reportedAt, resolved`
+  - Purpose for AI: `Provides adverse event records including severity and reporting timestamps`
 - Click **Register Contract**
-- A third card appears in the Service Catalogue instantly
-- Run any query — the AI Interpretation panel's service list will now include `sample-service` in its consideration
+- A fifth card appears in the Service Catalogue instantly
+- Run a query mentioning adverse events — the AI will now consider this service
 
 Key point: *"No restart, no code change. The AI prompt, validator allowlist, and UI catalogue all updated in real time."*
 
 ---
 
-### 7. Validation guardrail (Swagger)
+### 8. Validation guardrail (Swagger)
 
 Open `http://localhost:5000/swagger` → `POST /api/assistant/plan/validate`
 
@@ -110,7 +122,7 @@ Key point: *"The validator runs independently of the LLM. Any plan — from any 
 
 ---
 
-### 8. Audit trail
+### 9. Audit trail
 
 After any successful query, copy the `traceId` from the response JSON.
 

@@ -46,8 +46,12 @@ that plan is safe to run — regardless of what the LLM said.
 | Mode | Activated when | Behaviour |
 |---|---|---|
 | **Gemini** (`gemini-2.5-flash`) | `Gemini:ApiKey` is configured (recommended — free tier) | Real NL intent extraction — understands paraphrases like "overdue trials", "missed deadline" |
-| **OpenAI** (`gpt-4o-mini`) | `OpenAI:ApiKey` is configured (no Gemini key) | Real NL intent extraction with strict JSON schema |
+| **OpenAI** (`gpt-4o-mini`) | `OpenAI:ApiKey` is configured, no Gemini key | Real NL intent extraction with strict JSON schema |
+| **OpenRouter** (`openai/gpt-oss-120b:free`) | `OpenRouter:ApiKey` is configured, no Gemini/OpenAI key | OpenAI-compatible proxy — native structured output, free tier |
 | **Mock** (keyword match) | No API key (default) | Matches hardcoded phrases — suitable for local dev and tests without an API key |
+
+**Priority (default generator):** Gemini → OpenAI → OpenRouter → Mock.
+When multiple keys are configured, the UI **Provider Selector** lets you pick per-query.
 
 ## Quick Start
 
@@ -110,7 +114,19 @@ dotnet user-secrets set "OpenAI:ApiKey" "sk-proj-..."
 ```
 Startup logs: `info: Plan generator: OpenAiPlanGenerator (gpt-4o-mini, structured outputs)`
 
-**Priority:** If both keys are present, Gemini is used. Remove `Gemini:ApiKey` to use OpenAI.
+#### Option C — OpenRouter (free tier — `openai/gpt-oss-120b:free`)
+1. Sign up at **https://openrouter.ai** and create an API key (starts with `sk-or-v1-...`)
+2. Set the key:
+
+```bash
+dotnet user-secrets set "OpenRouter:ApiKey" "sk-or-v1-..."
+```
+
+Or set the model in `appsettings.json` under `OpenRouter:Model` (defaults to `openai/gpt-oss-120b:free`).
+
+Startup logs: `info: Plan generator: OpenRouterPlanGenerator (openai/gpt-oss-120b:free)`
+
+**Priority:** Gemini → OpenAI → OpenRouter → Mock. If multiple keys are set, all generators are registered and the UI Provider Selector lets you switch per-query.
 
 ### 3. Run Tests
 ```bash
@@ -147,9 +163,13 @@ Expected: ST-002 (Delayed, 2 days late) and ST-004 (Indeterminate, missing data)
 Open `http://localhost:4200` after starting both backend and frontend.
 
 **Service Catalogue** (top of page) — shows every registered service contract as a card.
+Four contracts are seeded at startup: **study-service** [required], **corelabs-service** [required],
+**sample-service** [optional], and **protocol-service** [optional].
 After a query runs, cards light up with "✓ Selected" or dim to show which services the AI picked.
 
 **Query bar** — pre-filled with an example query; four quick-pick buttons below.
+A **Provider Selector** appears when more than one AI provider key is configured, letting you
+switch between Gemini / OpenAI / OpenRouter / Mock per-query.
 
 **AI Interpretation panel** (appears after Run Query):
 - **Provider badge** — which generator was used (Gemini 2.5 Flash / GPT-4o Mini / Mock)

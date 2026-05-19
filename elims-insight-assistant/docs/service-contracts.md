@@ -32,6 +32,9 @@ the validator allowlist, the required-service check, and the UI catalogue — al
 
 ## Built-in Contracts (seeded at startup)
 
+Four contracts are seeded in `InMemoryServiceRegistry` at startup.
+Two are **required** (every valid plan must include them); two are **optional** (AI selects them only when relevant).
+
 ### `study-service` [REQUIRED]
 
 | Property | Value |
@@ -87,6 +90,36 @@ the validator allowlist, the required-service check, and the UI catalogue — al
 
 ---
 
+---
+
+### `sample-service` [OPTIONAL]
+
+| Property | Value |
+|---|---|
+| **Action** | `listSamples` |
+| **Purpose (AI prompt)** | Provides bioanalytical sample records — sample type, collection site, status, and collection timestamps |
+| **Description (UI)** | Bioanalytical sample catalogue — collection timestamps, sample type, status, and site linkage |
+| **Allowed fields** | `sampleId`, `studyId`, `sampleType`, `status`, `collectedAt`, `collectionSite` |
+| **IsRequired** | `false` — AI selects it only when the query involves samples |
+
+> No backend execution client is wired — the AI considers this service for routing decisions; backend integration requires adding a `DemoSampleServiceClient` and wiring it in `ExecutionEngine`. See `docs/solution-overview.md § Option B`.
+
+---
+
+### `protocol-service` [OPTIONAL]
+
+| Property | Value |
+|---|---|
+| **Action** | `listProtocols` |
+| **Purpose (AI prompt)** | Provides study protocol records — protocol version, approval status, and expiry dates |
+| **Description (UI)** | Study protocol catalogue — approved versions, status, and expiry timeline |
+| **Allowed fields** | `protocolId`, `studyId`, `version`, `status`, `approvedAt`, `expiresAt` |
+| **IsRequired** | `false` — AI selects it only when the query involves protocols or approvals |
+
+> No backend execution client is wired — same note as `sample-service`.
+
+---
+
 ## How the Registry Drives Each Subsystem
 
 ### 1. AI Prompt (`PromptBuilder.CoreInstructions`)
@@ -95,13 +128,21 @@ Every registered contract is listed in the prompt under `REGISTERED SERVICE CONT
 
 ```
 REGISTERED SERVICE CONTRACTS (select only those needed to answer the query):
-  study-service [REQUIRED] → action: listStudies
-    Purpose: Provides the study catalogue including planned completion dates...
-    Fields: studyId, studyCode, customer, legalEntity, plannedCompletionDate
   corelabs-service [REQUIRED] → action: listTestPs
     Purpose: Provides TestP execution records with completion timestamps...
     Fields: testpId, studyId, status, completedAt, runType, result
+  protocol-service [OPTIONAL] → action: listProtocols
+    Purpose: Provides study protocol records — version, approval status, and expiry dates
+    Fields: protocolId, studyId, version, status, approvedAt, expiresAt
+  sample-service [OPTIONAL] → action: listSamples
+    Purpose: Provides bioanalytical sample records — type, site, status, collection timestamps
+    Fields: sampleId, studyId, sampleType, status, collectedAt, collectionSite
+  study-service [REQUIRED] → action: listStudies
+    Purpose: Provides the study catalogue including planned completion dates...
+    Fields: studyId, studyCode, customer, legalEntity, plannedCompletionDate
 ```
+
+The LLM selects required services always, and optional services only when the query warrants them.
 
 The LLM selects services based on this block and provides a `reason` for each selection.
 
