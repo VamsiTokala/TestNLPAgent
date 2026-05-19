@@ -4,6 +4,7 @@ using ElimsInsightAssistant.Api.Models;
 using ElimsInsightAssistant.Api.Services;
 using ElimsInsightAssistant.Api.Validation;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace ElimsInsightAssistant.Api.Controllers;
 
@@ -15,7 +16,8 @@ public class AssistantController(
     IExecutionEngine executionEngine,
     IAuditService auditService,
     IServiceRegistry serviceRegistry,
-    IServiceProvider serviceProvider) : ControllerBase
+    IServiceProvider serviceProvider,
+    ILogger<AssistantController> logger) : ControllerBase
 {
     [HttpGet("providers")]
     public IActionResult GetProviders()
@@ -26,8 +28,6 @@ public class AssistantController(
         };
         if (serviceProvider.GetService<GeminiPlanGenerator>()     is { } g)
             all.Add(new { id = "gemini",     name = g.ProviderName,     available = true });
-        if (serviceProvider.GetService<OpenAiPlanGenerator>()     is { } o)
-            all.Add(new { id = "openai",     name = o.ProviderName,     available = true });
         if (serviceProvider.GetService<OpenRouterPlanGenerator>() is { } r)
             all.Add(new { id = "openrouter", name = r.ProviderName,     available = true });
         return Ok(all);
@@ -44,6 +44,8 @@ public class AssistantController(
         if (entry.Fields == null || entry.Fields.Count == 0) return BadRequest("At least one field is required.");
         if (string.IsNullOrWhiteSpace(entry.Purpose)) return BadRequest("Purpose is required (used in AI prompt).");
         serviceRegistry.Register(entry);
+        logger.LogInformation("Contract registered: {Name} (action={Action}, required={Required})",
+            entry.Name, entry.Action, entry.IsRequired);
         return Ok(serviceRegistry.GetAll());
     }
 
@@ -51,24 +53,53 @@ public class AssistantController(
     public async Task<ActionResult<AssistantQueryResponse>> Query([FromBody] NaturalLanguageQueryRequest request)
     {
         var generator = ResolveGenerator(request.Provider);
+        logger.LogInformation("Query received | provider={Provider} | user={User} | query={Query}",
+            generator.ProviderName, request.UserContext.UserId, request.Query);
+
         var result = await generator.GenerateAsync(request.Query);
 
         if (result.IsServerError)
+        {
+            logger.LogWarning("Plan generation failed (server error) | provider={Provider} | error={Error}",
+                generator.ProviderName, result.Error);
             return StatusCode(503, new { status = "ServiceUnavailable", message = result.Error });
+        }
 
         if (result.Plan is null)
+        {
+            logger.LogInformation("Query unsupported | provider={Provider} | reason={Reason}",
+                generator.ProviderName, result.Error);
             return Ok(new AssistantQueryResponse { Status = "UnsupportedQuery", PlanGeneratorMode = generator.ProviderName, Message = result.Error ?? "Unsupported query" });
+        }
+
+        logger.LogInformation("Plan generated | intent={Intent} | services={Services}",
+            result.Plan.Intent,
+            string.Join(", ", result.Plan.Operations.Select(o => o.Service)));
 
         var validation = validator.Validate(result.Plan);
         validation = validation with { Checks = [.. validation.Checks, new("User authorization", "Passed")] };
+
         if (validation.Status != "Passed")
+        {
+            logger.LogWarning("Validation failed | errors={Errors}",
+                string.Join("; ", validation.Errors ?? []));
             return BadRequest(validation);
+        }
+
+        logger.LogInformation("Validation passed | checks={Count}", validation.Checks.Count);
 
         var traceId = $"TRACE-{Guid.NewGuid():N}";
         var planId  = $"PLAN-{Guid.NewGuid():N}";
         var started = DateTime.UtcNow;
         var (summary, rows, servicesCalled) = await executionEngine.ExecuteAsync(result.Plan, request.UserContext);
         var finished = DateTime.UtcNow;
+
+        logger.LogInformation(
+            "Execution complete | traceId={TraceId} | services={Services} | rows={Rows} | onTime={OnTime} | delayed={Delayed} | indeterminate={Indeterminate} | elapsed={Elapsed}ms",
+            traceId,
+            string.Join(", ", servicesCalled),
+            rows.Count, summary.OnTime, summary.Delayed, summary.Indeterminate,
+            (int)(finished - started).TotalMilliseconds);
 
         var response = new AssistantQueryResponse
         {
@@ -138,7 +169,6 @@ public class AssistantController(
         providerId?.ToLowerInvariant() switch
         {
             "gemini"     => (IPlanGenerator?)serviceProvider.GetService<GeminiPlanGenerator>()     ?? defaultGenerator,
-            "openai"     => (IPlanGenerator?)serviceProvider.GetService<OpenAiPlanGenerator>()     ?? defaultGenerator,
             "openrouter" => (IPlanGenerator?)serviceProvider.GetService<OpenRouterPlanGenerator>() ?? defaultGenerator,
             "mock"       => serviceProvider.GetRequiredService<MockPlanGenerator>(),
             _            => defaultGenerator

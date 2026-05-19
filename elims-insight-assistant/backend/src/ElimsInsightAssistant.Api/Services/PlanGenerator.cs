@@ -112,7 +112,7 @@ If the query is NOT about study completion timeliness:
 
 // ─── Mock (no API key required — local dev and tests) ────────────────────────
 
-public class MockPlanGenerator(IServiceRegistry registry) : IPlanGenerator
+public class MockPlanGenerator(IServiceRegistry registry, ILogger<MockPlanGenerator> logger) : IPlanGenerator
 {
     public string ProviderName => "Mock (keyword matching)";
 
@@ -127,10 +127,14 @@ public class MockPlanGenerator(IServiceRegistry registry) : IPlanGenerator
     public Task<PlanGeneratorResult> GenerateAsync(string query)
     {
         var q = query.ToLowerInvariant();
+        logger.LogInformation("Mock → evaluating query: {Query}", query);
         if (!SupportedTerms.Any(q.Contains))
+        {
+            logger.LogInformation("Mock ← no keyword match — unsupported");
             return Task.FromResult(new PlanGeneratorResult(
                 string.Empty, null,
                 "This demo currently supports queries related to study completion timeliness."));
+        }
 
         var classifications = ResolveClassifications(q);
         var contracts = registry.GetAll();
@@ -173,6 +177,10 @@ Read-only, deterministic, approved service contracts only.
             )).ToList(),
             Output = new PlanOutput(classifications)
         };
+
+        logger.LogInformation("Mock ← plan ready | classifications={Classifications} | services={Services}",
+            string.Join(", ", classifications),
+            string.Join(", ", contracts.Select(c => c.Name)));
 
         return Task.FromResult(new PlanGeneratorResult(markdown, plan, null));
     }
@@ -263,6 +271,7 @@ User query: {{query}}
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
         try
         {
+            logger.LogInformation("Gemini → sending query: {Query}", query);
             var response = await _model.GenerateContent(BuildPrompt(query), cancellationToken: cts.Token);
             var raw = response.Text ?? string.Empty;
 
@@ -306,6 +315,11 @@ User query: {{query}}
                     plan.Intent, plan.Operations.Count, json);
                 return new PlanGeneratorResult(string.Empty, null, "Query not supported by this assistant.");
             }
+
+            logger.LogInformation("Gemini ← plan ready | intent={Intent} | services={Services} | classifications={Classifications}",
+                plan.Intent,
+                string.Join(", ", plan.Operations.Select(o => o.Service)),
+                string.Join(", ", plan.Output?.IncludeClassifications ?? []));
 
             return new PlanGeneratorResult(markdown, plan, null);
         }
@@ -501,6 +515,7 @@ public class OpenRouterPlanGenerator(IConfiguration config, IServiceRegistry reg
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
         try
         {
+            logger.LogInformation("OpenRouter ({Model}) → sending query: {Query}", _model, query);
             var systemPrompt =
                 "You are a governed analytics plan generator for a laboratory information management system (LIMS).\n\n" +
                 PromptBuilder.CoreInstructions(registry.GetAll()) +
@@ -552,6 +567,11 @@ public class OpenRouterPlanGenerator(IConfiguration config, IServiceRegistry reg
                 logger.LogWarning("OpenRouter returned incomplete plan. Raw: {Json}", json);
                 return new PlanGeneratorResult(string.Empty, null, "Query not supported by this assistant.");
             }
+
+            logger.LogInformation("OpenRouter ← plan ready | intent={Intent} | services={Services} | classifications={Classifications}",
+                plan.Intent,
+                string.Join(", ", plan.Operations.Select(o => o.Service)),
+                string.Join(", ", plan.Output?.IncludeClassifications ?? []));
 
             return new PlanGeneratorResult(markdown, plan, null);
         }

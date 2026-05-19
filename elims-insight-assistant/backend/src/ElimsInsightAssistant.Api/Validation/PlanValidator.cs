@@ -61,9 +61,9 @@ public class PlanValidator(IServiceRegistry registry) : IPlanValidator
                 var entry = allowlist[op.Service];
                 if (!entry.actions.Contains(op.Action))
                     errors.Add($"Unapproved action: {op.Service}.{op.Action}");
-                foreach (var field in op.Select.Where(f => !entry.fields.Contains(f)))
+                foreach (var field in (op.Select ?? []).Where(f => !entry.fields.Contains(f)))
                     errors.Add($"Unapproved field: {op.Service}.{field}");
-                foreach (var filter in op.Filters)
+                foreach (var filter in op.Filters ?? [])
                 {
                     if (!AllowedOperators.Contains(filter.Op.ToLowerInvariant()))
                         errors.Add($"Unapproved operator: {filter.Op}");
@@ -78,7 +78,7 @@ public class PlanValidator(IServiceRegistry registry) : IPlanValidator
                 errors.Add("Write/update/delete operation is forbidden");
         }
 
-        foreach (var agg in plan.Transform.Aggregates)
+        foreach (var agg in plan.Transform?.Aggregates ?? [])
             if (!AllowedAggs.Contains(agg.Fn.ToLowerInvariant()))
                 errors.Add($"Unapproved aggregate function: {agg.Fn}");
 
