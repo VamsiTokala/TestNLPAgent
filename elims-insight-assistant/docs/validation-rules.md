@@ -15,7 +15,7 @@ Ensures the LLM returned a structurally complete plan, not a partial or confused
 |---|---|
 | Intent present | `plan.Intent` is non-null and non-whitespace |
 | Operations non-empty | `plan.Operations` contains at least one entry |
-| Required services present | all contracts with `IsRequired=true` in `IServiceRegistry` appear in operations (currently: `study-service`, `corelabs-service`) |
+| Required services present | all contracts with `IsRequired=true` in `IServiceRegistry` appear in operations (currently: `study-service`, `corelabs-service`; optional: `sample-service`, `protocol-service`) |
 | Entities non-empty | `plan.Entities` contains `"study"` and `"testp"` |
 
 These checks stop a blank-intent / empty-operations plan (which a confused LLM can
@@ -33,7 +33,10 @@ Every `operation.service` must match a contract registered in `IServiceRegistry`
 The allowlist is derived at validation time — `PlanValidator(IServiceRegistry registry)` calls
 `registry.GetAll()` so newly registered contracts are immediately permitted without a restart.
 
-Currently registered (built-in): `study-service`, `corelabs-service`
+Currently registered (built-in):
+- `study-service` [REQUIRED], `corelabs-service` [REQUIRED]
+- `sample-service` [OPTIONAL], `protocol-service` [OPTIONAL]
+
 Additional contracts can be registered via `POST /api/assistant/contracts` or the UI **+ Register Contract** button.
 
 Any service name not in the registry is rejected — the LLM cannot invent new service endpoints.
@@ -48,6 +51,8 @@ Every field in `operation.select` must be in that service's permitted field list
 |---|---|
 | `study-service` | `studyId`, `studyCode`, `customer`, `legalEntity`, `plannedCompletionDate` |
 | `corelabs-service` | `testpId`, `studyId`, `status`, `completedAt`, `runType`, `result` |
+| `sample-service` | `sampleId`, `studyId`, `sampleType`, `status`, `collectedAt`, `collectionSite` |
+| `protocol-service` | `protocolId`, `studyId`, `version`, `status`, `approvedAt`, `expiresAt` |
 
 Field lists are also derived from the registry — each contract's `Fields` array defines what is permitted for that service.
 

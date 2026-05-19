@@ -1,8 +1,8 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, OnDestroy } from '@angular/core';
 import { FormBuilder, FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { NgFor, NgIf, NgClass, JsonPipe, DatePipe, SlicePipe, LowerCasePipe } from '@angular/common';
 import { timeout, TimeoutError } from 'rxjs';
-import { InsightAssistantApiService } from './services/insight-assistant-api.service';
+import { InsightAssistantApiService, ProviderInfo } from './services/insight-assistant-api.service';
 import { AssistantQueryResponse } from './models/assistant-query-response.model';
 import { ServiceContractEntry } from './models/service-contract.model';
 
@@ -13,7 +13,7 @@ import { ServiceContractEntry } from './models/service-contract.model';
   styleUrls: ['./insight-assistant.component.scss'],
   imports: [ReactiveFormsModule, NgFor, NgIf, NgClass, JsonPipe, DatePipe, SlicePipe, LowerCasePipe]
 })
-export class InsightAssistantComponent implements OnInit {
+export class InsightAssistantComponent implements OnInit, OnDestroy {
   examples = [
     'Find studies not completed on time',
     'Show delayed studies',
@@ -29,12 +29,20 @@ export class InsightAssistantComponent implements OnInit {
   isLoading = false;
   form: FormGroup;
 
+  // Provider selector
+  providers: ProviderInfo[] = [];
+  selectedProvider: string | null = null;
+
   // Service catalogue state
   contracts: ServiceContractEntry[] = [];
   showAddForm = false;
   addForm: FormGroup;
   addError: string | null = null;
   addSuccess = false;
+
+  // Pipeline tracker: 0=idle 1=sending 2=generating 3=validating 4=executing 5=complete
+  pipelineStep = 0;
+  private _pipeTimers: ReturnType<typeof setTimeout>[] = [];
 
   get queryControl(): FormControl { return this.form.get('query') as FormControl; }
 
@@ -44,7 +52,7 @@ export class InsightAssistantComponent implements OnInit {
       name:        ['', Validators.required],
       displayName: ['', Validators.required],
       action:      ['', Validators.required],
-      fieldsRaw:   ['', Validators.required],   // comma-separated
+      fieldsRaw:   ['', Validators.required],
       purpose:     ['', Validators.required],
       description: [''],
       isRequired:  [false]
@@ -53,17 +61,44 @@ export class InsightAssistantComponent implements OnInit {
 
   ngOnInit(): void {
     this.api.getContracts().subscribe({ next: c => this.contracts = c });
+    this.api.getProviders().subscribe({
+      next: p => {
+        this.providers = p;
+        this.selectedProvider = p[0]?.id ?? null;
+      }
+    });
   }
+
+  ngOnDestroy(): void { this.clearPipeTimers(); }
 
   runQuery(): void {
     this.error = null;
     this.response = null;
     this.isLoading = true;
-    this.api.query(this.form.value.query || '').pipe(timeout(55000)).subscribe({
-      next: (r: AssistantQueryResponse) => { this.response = r; this.isLoading = false; },
+    this.pipelineStep = 1;
+    this.clearPipeTimers();
+
+    const t1 = setTimeout(() => { if (this.isLoading) this.pipelineStep = 2; }, 700);
+    this._pipeTimers.push(t1);
+
+    this.api.query(this.form.value.query || '', this.selectedProvider ?? undefined).pipe(timeout(55000)).subscribe({
+      next: (r: AssistantQueryResponse) => {
+        this.response = r;
+        this.pipelineStep = 3;
+        const t2 = setTimeout(() => {
+          this.pipelineStep = 4;
+          const t3 = setTimeout(() => {
+            this.pipelineStep = 5;
+            this.isLoading = false;
+          }, 400);
+          this._pipeTimers.push(t3);
+        }, 400);
+        this._pipeTimers.push(t2);
+      },
       error: (err) => {
+        this.pipelineStep = 0;
         if (err instanceof TimeoutError) {
-          this.error = 'Request timed out. Gemini free tier can be slow — please try again in a moment.';
+          this.error = 'Request timed out. The AI provider can be slow — please try again in a moment.';
         } else {
           this.error = err?.error?.message ?? err?.error?.errors?.join(', ') ?? err?.error?.title ?? 'An unexpected error occurred.';
         }
@@ -74,7 +109,24 @@ export class InsightAssistantComponent implements OnInit {
 
   setQuery(q: string): void { this.form.patchValue({ query: q }); }
 
-  // ── Service catalogue helpers ──────────────────────────────────────────────
+  // ── Pipeline helpers ───────────────────────────────────────────────────────────
+
+  psClass(step: number): string {
+    if (this.pipelineStep < step) return 'ps--pending';
+    if (this.pipelineStep === step) return 'ps--active';
+    return 'ps--done';
+  }
+  psIsDone(step: number): boolean   { return this.pipelineStep > step; }
+  psIsActive(step: number): boolean { return this.pipelineStep === step; }
+
+  classSlug(c: string): string { return c.toLowerCase().replace(/\s+/g, '-'); }
+
+  private clearPipeTimers(): void {
+    this._pipeTimers.forEach(t => clearTimeout(t));
+    this._pipeTimers = [];
+  }
+
+  // ── Service catalogue helpers ──────────────────────────────────────────────────
 
   isServiceSelected(name: string): boolean {
     return this.response?.jsonPlan?.operations?.some(op => op.service === name) ?? false;
@@ -114,7 +166,7 @@ export class InsightAssistantComponent implements OnInit {
     });
   }
 
-  // ── AI panel helpers ───────────────────────────────────────────────────────
+  // ── AI panel helpers ───────────────────────────────────────────────────────────
 
   isClassificationIncluded(c: string): boolean {
     return this.response?.jsonPlan?.output?.includeClassifications?.includes(c) ?? false;

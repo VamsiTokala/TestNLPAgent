@@ -44,6 +44,24 @@ public class InMemoryServiceRegistry : IServiceRegistry
             Purpose: "Provides TestP execution records — status, run type, result, and actual completion timestamps",
             Description: "TestP execution records — actual completion timestamps are derived from the maximum TestP.completedAt per study",
             IsRequired: true));
+
+        Register(new ServiceContractEntry(
+            Name: "sample-service",
+            DisplayName: "Sample Service",
+            Action: "listSamples",
+            Fields: ["sampleId", "studyId", "sampleType", "status", "collectedAt", "collectionSite"],
+            Purpose: "Provides bioanalytical sample records — sample type, collection site, status, and collection timestamps",
+            Description: "Bioanalytical sample catalogue — collection timestamps, sample type, status, and site linkage",
+            IsRequired: false));
+
+        Register(new ServiceContractEntry(
+            Name: "protocol-service",
+            DisplayName: "Protocol Service",
+            Action: "listProtocols",
+            Fields: ["protocolId", "studyId", "version", "status", "approvedAt", "expiresAt"],
+            Purpose: "Provides study protocol records — protocol version, approval status, and expiry dates",
+            Description: "Study protocol catalogue — approved versions, status, and expiry timeline",
+            IsRequired: false));
     }
 
     public IReadOnlyList<ServiceContractEntry> GetAll() =>

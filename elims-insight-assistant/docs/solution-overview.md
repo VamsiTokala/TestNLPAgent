@@ -12,9 +12,13 @@
    (includes any contracts added via UI / POST /api/assistant/contracts)
         ↓
 4. IPlanGenerator.GenerateAsync(query)
-        ├── GeminiPlanGenerator  (Gemini:ApiKey set) → gemini-2.5-flash, JSON mode
-        ├── OpenAiPlanGenerator  (OpenAI:ApiKey set) → gpt-4o-mini, strict JSON schema
-        └── MockPlanGenerator    (no key)            → keyword matching, no API call
+        ├── GeminiPlanGenerator      (Gemini:ApiKey set)     → gemini-2.5-flash, JSON mode
+        ├── OpenAiPlanGenerator      (OpenAI:ApiKey set)     → gpt-4o-mini, strict JSON schema
+        ├── OpenRouterPlanGenerator  (OpenRouter:ApiKey set) → gpt-oss-120b:free, JSON object format
+        └── MockPlanGenerator        (no key)                → keyword matching, no API call
+
+   UI Provider Selector (shown when >1 key is configured) lets user pick per-query.
+   Default priority: Gemini → OpenAI → OpenRouter → Mock.
 
    The prompt injected into Gemini/OpenAI is built dynamically from the registry:
      • PromptBuilder.ServicesBlock()  — lists every registered contract with action/fields/purpose
@@ -72,8 +76,13 @@
    Retrievable via GET /api/assistant/audit/{traceId}
         ↓
 8. HTTP 200 → Angular renders:
-   ├── AI Interpretation panel
-   │     ├── Provider badge (Gemini 2.5 Flash / GPT-4o Mini / Mock)
+   ├── Pipeline Tracker (persists after query — transparent view of every stage)
+   │     ├── ① Sending query → provider name badge when done
+   │     ├── ② AI generating plan → expands: intent · selected services + reasons · classification filter
+   │     ├── ③ Validating → expands: every check pill (pass/fail) by name
+   │     └── ④ Executing → expands: services called · summary counts · first 3 result previews
+   ├── AI Interpretation panel (full detail, appears after tracker completes)
+   │     ├── Provider badge (Gemini 2.5 Flash / GPT-4o Mini / OpenRouter / Mock)
    │     ├── Intent Detected badge
    │     ├── Classification Filter rows (included / excluded per classification)
    │     ├── Service Contract Selection pipeline with per-operation AI reason
@@ -83,8 +92,8 @@
    ├── Generated Plan (Markdown)
    └── JSON Execution Plan (collapsible)
 
-   If status = "UnsupportedQuery" → shows reason message, no plan/results rendered.
-   If HTTP 4xx/5xx → shows error banner.
+   If status = "UnsupportedQuery" → tracker step ② shows reason, steps ③–④ show "skipped".
+   If HTTP 4xx/5xx → shows error banner, tracker resets.
 ```
 
 **The core safety property:** The LLM output is a JSON plan *proposal*. Nothing executes until the
@@ -101,16 +110,19 @@ User query (Angular UI)
     ▼
 IServiceRegistry ────────────────────────────────────────────────────
 │  InMemoryServiceRegistry (ConcurrentDictionary)
-│  • Seeded with study-service [REQUIRED] and corelabs-service [REQUIRED]
+│  • Seeded with 4 contracts:
+│      study-service [REQUIRED], corelabs-service [REQUIRED]
+│      sample-service [OPTIONAL], protocol-service [OPTIONAL]
 │  • Accepts new contracts at runtime via POST /api/assistant/contracts
 │  • Single source of truth for: AI prompt content, validator allowlist,
 │    required-service check, and UI contract catalogue
     │
     ▼ (contracts passed into)
 IPlanGenerator ──────────────────────────────────────────────────────
-│  GeminiPlanGenerator   Gemini:ApiKey set   gemini-2.5-flash JSON mode
-│  OpenAiPlanGenerator   OpenAI:ApiKey set   gpt-4o-mini strict schema
-│  MockPlanGenerator     no key              keyword matching, no cost
+│  GeminiPlanGenerator      Gemini:ApiKey set     gemini-2.5-flash JSON mode
+│  OpenAiPlanGenerator      OpenAI:ApiKey set     gpt-4o-mini strict schema
+│  OpenRouterPlanGenerator  OpenRouter:ApiKey set gpt-oss-120b:free JSON object format
+│  MockPlanGenerator        no key                keyword matching, no cost
 │
 │  Prompt is built dynamically: PromptBuilder.CoreInstructions(contracts)
 │  includes every registered service with its action, fields, and purpose.
@@ -291,28 +303,44 @@ the registry handles all of that automatically.
 
 ---
 
-## Plan Generator — Three Modes
+## Plan Generator — Four Modes
 
 | Mode | Class | Activated when | How It Works |
 |---|---|---|---|
 | **Gemini** (recommended) | `GeminiPlanGenerator` | `Gemini:ApiKey` is set | Sends query + dynamic prompt to gemini-2.5-flash with `ResponseMimeType=application/json`; parses response into `ExecutionPlan`; post-parse check rejects blank intent or empty operations |
 | **OpenAI** | `OpenAiPlanGenerator` | `OpenAI:ApiKey` is set, no Gemini key | Sends query + system prompt to gpt-4o-mini with strict JSON schema enforcement; schema includes `output.includeClassifications` and per-operation `reason` |
+| **OpenRouter** | `OpenRouterPlanGenerator` | `OpenRouter:ApiKey` is set | OpenAI-compatible proxy; uses `CreateJsonObjectFormat()`; model configurable via `OpenRouter:Model` (default: `openai/gpt-oss-120b:free`); first-`{`/last-`}` extractor handles any preamble |
 | **Mock** | `MockPlanGenerator` | No API key (local dev, CI, tests) | Lowercases query, matches phrase list, calls `ResolveClassifications()` to pick the right filter — no network call, no cost |
 
-**Priority order:** Gemini → OpenAI → Mock.
+**Default priority:** Gemini → OpenAI → OpenRouter → Mock.
+When multiple keys are set all generators are registered as singletons; the UI **Provider Selector** lets the user pick per-query.
 
 All three generators receive the live registry so their output always reflects
 the current set of registered contracts.
 
 ---
 
+## Pipeline Tracker — Real-Time AI Evaluation View
+
+After clicking **Run Query**, a 4-step pipeline tracker appears and persists after completion:
+
+| Step | While running | Expanded detail when done |
+|---|---|---|
+| ① Sending query to AI provider | pulsing dots | Provider name badge |
+| ② AI generating execution plan | pulsing dots | Intent · selected services + AI reasons · classification filter choices |
+| ③ Validating plan against allowlist | pulsing dots | Every validation check by name (pass ✓ / fail ✗ pill) |
+| ④ Executing against services | pulsing dots | Services called · On Time / Delayed / Indeterminate counts · first 3 result rows preview |
+
+Steps 3 and 4 flash in (400 ms each) on response arrival before the full response panels appear.
+For unsupported queries step ② shows the AI's reason and steps ③–④ show "skipped".
+
 ## AI Interpretation Panel — What the UI Shows
 
-After a query runs, the AI Interpretation panel reveals the LLM's reasoning in real time:
+After the tracker completes, the full **AI Interpretation panel** renders with the same data in a richer layout:
 
 | Section | What it shows |
 |---|---|
-| **Provider badge** | Which generator was used (Gemini 2.5 Flash / GPT-4o Mini / Mock) |
+| **Provider badge** | Which generator was used (Gemini 2.5 Flash / GPT-4o Mini / OpenRouter / Mock) |
 | **Intent Detected** | The `intent` string from the plan (e.g. `find_studies_not_completed_on_time`) |
 | **Classification Filter** | All three classifications with "included" / "excluded" status based on `output.includeClassifications` |
 | **Service Contract Selection** | Each selected operation as a pipeline card showing service name, action tag, and the AI's per-operation `reason` |
@@ -337,12 +365,17 @@ and dim the ones it skipped, with the AI's reason displayed inline.
 
 ## Seed-Data Expected Output
 
+12 studies are seeded across EU and US legal entities (5 customers). Representative samples:
+
 | Study | Customer | Entity | Planned | Actual | Classification |
 |---|---|---|---|---|---|
 | ST-001 | ABC Pharma | EU | Apr 10 | Apr 9 | On Time |
 | ST-002 | XYZ Labs | EU | Apr 15 | Apr 17 | **Delayed** |
 | ST-003 | BioTest | US | Apr 20 | Apr 18 | On Time |
 | ST-004 | Delta Bio | EU | null | null | **Indeterminate** |
+| ST-005 – ST-012 | Various | EU/US | Various | Various | Mix of all three |
+
+21 TestP records cover Primary, Repeat, and Production run types with Pass/Fail results.
 
 Default query (legalEntities: EU + US, includeClassifications: Delayed + Indeterminate)
-returns ST-002 and ST-004. Summary always shows all four studies.
+returns all Delayed and Indeterminate studies. Summary cards always show counts across all 12.
