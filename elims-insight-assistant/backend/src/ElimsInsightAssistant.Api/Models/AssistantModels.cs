@@ -1,6 +1,6 @@
 namespace ElimsInsightAssistant.Api.Models;
 
-public record NaturalLanguageQueryRequest(string Query, UserContext UserContext);
+public record NaturalLanguageQueryRequest(string Query, UserContext UserContext, string? Provider = null);
 public record UserContext(string UserId, List<string> Roles, List<string> LegalEntities);
 
 public record AssistantQueryResponse

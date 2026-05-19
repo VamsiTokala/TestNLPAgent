@@ -3,9 +3,6 @@ using ElimsInsightAssistant.Api.Execution;
 using ElimsInsightAssistant.Api.Services;
 using ElimsInsightAssistant.Api.Validation;
 
-// Service registry must be registered before plan generators and validators
-// so they can all share the same singleton instance.
-
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
@@ -17,6 +14,13 @@ var geminiKey     = builder.Configuration["Gemini:ApiKey"];
 var openAiKey     = builder.Configuration["OpenAI:ApiKey"];
 var openRouterKey = builder.Configuration["OpenRouter:ApiKey"];
 
+// Register every available generator — controller picks one per request
+builder.Services.AddSingleton<MockPlanGenerator>();
+if (!string.IsNullOrWhiteSpace(geminiKey))     builder.Services.AddSingleton<GeminiPlanGenerator>();
+if (!string.IsNullOrWhiteSpace(openAiKey))     builder.Services.AddSingleton<OpenAiPlanGenerator>();
+if (!string.IsNullOrWhiteSpace(openRouterKey)) builder.Services.AddSingleton<OpenRouterPlanGenerator>();
+
+// Default generator (used when no provider is specified in the request)
 if (!string.IsNullOrWhiteSpace(geminiKey))
     builder.Services.AddSingleton<IPlanGenerator, GeminiPlanGenerator>();
 else if (!string.IsNullOrWhiteSpace(openAiKey))
@@ -38,19 +42,11 @@ app.UseSwagger();
 app.UseSwaggerUI();
 app.MapControllers();
 
-// Log active mode clearly at startup so there is no silent fallback to mock
 var logger = app.Services.GetRequiredService<ILogger<Program>>();
-if (!string.IsNullOrWhiteSpace(geminiKey))
-    logger.LogInformation("Plan generator: GeminiPlanGenerator (gemini-2.5-flash, JSON mode)");
-else if (!string.IsNullOrWhiteSpace(openAiKey))
-    logger.LogInformation("Plan generator: OpenAiPlanGenerator (gpt-4o-mini, structured outputs)");
-else if (!string.IsNullOrWhiteSpace(openRouterKey))
-    logger.LogInformation("Plan generator: OpenRouterPlanGenerator (model: {Model})",
-        builder.Configuration["OpenRouter:Model"] ?? "mistralai/mistral-7b-instruct");
-else
-    logger.LogWarning(
-        "Plan generator: MockPlanGenerator (keyword matching only — no real NLP). " +
-        "To enable real NL intent extraction set Gemini:ApiKey, OpenAI:ApiKey, or OpenRouter:ApiKey. " +
-        "See docs/build-from-scratch.md Step 14.1 for how to obtain and configure a key.");
+var available = new List<string> { "mock" };
+if (!string.IsNullOrWhiteSpace(geminiKey))     available.Add("gemini");
+if (!string.IsNullOrWhiteSpace(openAiKey))     available.Add("openai");
+if (!string.IsNullOrWhiteSpace(openRouterKey)) available.Add("openrouter");
+logger.LogInformation("Available plan generators: {Generators}", string.Join(", ", available));
 
 app.Run();

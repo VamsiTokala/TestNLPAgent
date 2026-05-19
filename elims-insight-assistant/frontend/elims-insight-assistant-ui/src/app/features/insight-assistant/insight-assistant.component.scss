@@ -351,6 +351,45 @@ $slate-900:    #0f172a;
   }
 }
 
+.query-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: .5rem;
+  margin-bottom: .5rem;
+  label { margin-bottom: 0; }
+}
+
+.provider-selector {
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+}
+
+.provider-selector-label {
+  font-size: .72rem;
+  font-weight: 600;
+  color: $slate-500;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+
+.provider-btn {
+  padding: .3rem .75rem;
+  font-size: .75rem;
+  font-weight: 600;
+  border: 1.5px solid $slate-200;
+  border-radius: 999px;
+  background: $slate-50;
+  color: $slate-500;
+  cursor: pointer;
+  transition: all .15s;
+  &:hover:not(:disabled) { border-color: $blue; color: $blue; background: #eff6ff; }
+  &--active { background: $blue; color: #fff; border-color: $blue; }
+  &:disabled { opacity: .5; cursor: default; }
+}
+
 .query-row {
   display: flex;
   gap: .75rem;

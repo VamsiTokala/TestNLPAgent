@@ -10,44 +10,54 @@ namespace ElimsInsightAssistant.Api.Controllers;
 [ApiController]
 [Route("api/assistant")]
 public class AssistantController(
-    IPlanGenerator planGenerator,
+    IPlanGenerator defaultGenerator,
     IPlanValidator validator,
     IExecutionEngine executionEngine,
     IAuditService auditService,
-    IServiceRegistry serviceRegistry) : ControllerBase
+    IServiceRegistry serviceRegistry,
+    IServiceProvider serviceProvider) : ControllerBase
 {
+    [HttpGet("providers")]
+    public IActionResult GetProviders()
+    {
+        var all = new List<object>
+        {
+            new { id = "mock", name = "Mock (keyword matching)", available = true }
+        };
+        if (serviceProvider.GetService<GeminiPlanGenerator>()     is { } g)
+            all.Add(new { id = "gemini",     name = g.ProviderName,     available = true });
+        if (serviceProvider.GetService<OpenAiPlanGenerator>()     is { } o)
+            all.Add(new { id = "openai",     name = o.ProviderName,     available = true });
+        if (serviceProvider.GetService<OpenRouterPlanGenerator>() is { } r)
+            all.Add(new { id = "openrouter", name = r.ProviderName,     available = true });
+        return Ok(all);
+    }
+
     [HttpGet("contracts")]
     public IActionResult GetContracts() => Ok(serviceRegistry.GetAll());
 
     [HttpPost("contracts")]
     public IActionResult RegisterContract([FromBody] ServiceContractEntry entry)
     {
-        if (string.IsNullOrWhiteSpace(entry.Name))
-            return BadRequest("Name is required.");
-        if (string.IsNullOrWhiteSpace(entry.Action))
-            return BadRequest("Action is required.");
-        if (entry.Fields == null || entry.Fields.Count == 0)
-            return BadRequest("At least one field is required.");
-        if (string.IsNullOrWhiteSpace(entry.Purpose))
-            return BadRequest("Purpose is required (used in AI prompt).");
-
+        if (string.IsNullOrWhiteSpace(entry.Name))    return BadRequest("Name is required.");
+        if (string.IsNullOrWhiteSpace(entry.Action))  return BadRequest("Action is required.");
+        if (entry.Fields == null || entry.Fields.Count == 0) return BadRequest("At least one field is required.");
+        if (string.IsNullOrWhiteSpace(entry.Purpose)) return BadRequest("Purpose is required (used in AI prompt).");
         serviceRegistry.Register(entry);
         return Ok(serviceRegistry.GetAll());
     }
 
-
     [HttpPost("query")]
     public async Task<ActionResult<AssistantQueryResponse>> Query([FromBody] NaturalLanguageQueryRequest request)
     {
-        var result = await planGenerator.GenerateAsync(request.Query);
+        var generator = ResolveGenerator(request.Provider);
+        var result = await generator.GenerateAsync(request.Query);
 
-        // Transient server error (network, provider outage) → 503 so clients can retry
         if (result.IsServerError)
             return StatusCode(503, new { status = "ServiceUnavailable", message = result.Error });
 
-        // Genuinely unsupported query → 200 with status flag (not an error, just out of scope)
         if (result.Plan is null)
-            return Ok(new AssistantQueryResponse { Status = "UnsupportedQuery", PlanGeneratorMode = planGenerator.ProviderName, Message = result.Error ?? "Unsupported query" });
+            return Ok(new AssistantQueryResponse { Status = "UnsupportedQuery", PlanGeneratorMode = generator.ProviderName, Message = result.Error ?? "Unsupported query" });
 
         var validation = validator.Validate(result.Plan);
         validation = validation with { Checks = [.. validation.Checks, new("User authorization", "Passed")] };
@@ -62,31 +72,31 @@ public class AssistantController(
 
         var response = new AssistantQueryResponse
         {
-            PlanId             = planId,
-            TraceId            = traceId,
-            PlanGeneratorMode  = planGenerator.ProviderName,
-            MarkdownPlan       = result.Markdown,
-            JsonPlan           = result.Plan,
-            Validation         = validation,
-            Summary            = summary,
-            Results            = rows
+            PlanId            = planId,
+            TraceId           = traceId,
+            PlanGeneratorMode = generator.ProviderName,
+            MarkdownPlan      = result.Markdown,
+            JsonPlan          = result.Plan,
+            Validation        = validation,
+            Summary           = summary,
+            Results           = rows
         };
 
         auditService.Save(new AuditRecord
         {
-            TraceId             = traceId,
-            PlanId              = planId,
-            OriginalQuery       = request.Query,
-            UserId              = request.UserContext.UserId,
-            MarkdownPlan        = result.Markdown,
-            JsonPlan            = result.Plan,
-            ValidationStatus    = validation.Status,
-            ValidationChecks    = validation.Checks,
-            ServicesCalled      = servicesCalled,
-            ExecutionStartedAt  = started,
+            TraceId              = traceId,
+            PlanId               = planId,
+            OriginalQuery        = request.Query,
+            UserId               = request.UserContext.UserId,
+            MarkdownPlan         = result.Markdown,
+            JsonPlan             = result.Plan,
+            ValidationStatus     = validation.Status,
+            ValidationChecks     = validation.Checks,
+            ServicesCalled       = servicesCalled,
+            ExecutionStartedAt   = started,
             ExecutionCompletedAt = finished,
-            ResultSummary       = summary,
-            ResultSnapshot      = rows
+            ResultSummary        = summary,
+            ResultSnapshot       = rows
         });
 
         return Ok(response);
@@ -95,7 +105,8 @@ public class AssistantController(
     [HttpPost("plan")]
     public async Task<ActionResult<object>> Plan([FromBody] NaturalLanguageQueryRequest request)
     {
-        var result = await planGenerator.GenerateAsync(request.Query);
+        var generator = ResolveGenerator(request.Provider);
+        var result = await generator.GenerateAsync(request.Query);
         if (result.IsServerError)
             return StatusCode(503, new { status = "ServiceUnavailable", message = result.Error });
         if (result.Plan is null)
@@ -122,6 +133,16 @@ public class AssistantController(
         var record = auditService.Get(traceId);
         return record is null ? NotFound() : Ok(record);
     }
+
+    private IPlanGenerator ResolveGenerator(string? providerId) =>
+        providerId?.ToLowerInvariant() switch
+        {
+            "gemini"     => (IPlanGenerator?)serviceProvider.GetService<GeminiPlanGenerator>()     ?? defaultGenerator,
+            "openai"     => (IPlanGenerator?)serviceProvider.GetService<OpenAiPlanGenerator>()     ?? defaultGenerator,
+            "openrouter" => (IPlanGenerator?)serviceProvider.GetService<OpenRouterPlanGenerator>() ?? defaultGenerator,
+            "mock"       => serviceProvider.GetRequiredService<MockPlanGenerator>(),
+            _            => defaultGenerator
+        };
 }
 
 public record ExecuteRequest(ExecutionPlan Plan, UserContext UserContext);

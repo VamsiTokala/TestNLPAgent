@@ -110,7 +110,19 @@
 
   <!-- ── Query card ──────────────────────────────────────────────────────── -->
   <div class="query-card">
-    <label>Ask eLIMS</label>
+    <div class="query-card-header">
+      <label>Ask eLIMS</label>
+      <div class="provider-selector" *ngIf="providers.length > 1">
+        <span class="provider-selector-label">AI Provider:</span>
+        <button *ngFor="let p of providers"
+                class="provider-btn"
+                [class.provider-btn--active]="selectedProvider === p.id"
+                (click)="selectedProvider = p.id"
+                [disabled]="isLoading">
+          {{ p.name }}
+        </button>
+      </div>
+    </div>
     <div class="query-row">
       <input [formControl]="queryControl" placeholder="e.g. filter studies with classification Indeterminate" />
       <button class="btn-run" (click)="runQuery()" [disabled]="isLoading">

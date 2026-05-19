@@ -2,7 +2,7 @@ import { Component, OnInit } from '@angular/core';
 import { FormBuilder, FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { NgFor, NgIf, NgClass, JsonPipe, DatePipe, SlicePipe, LowerCasePipe } from '@angular/common';
 import { timeout, TimeoutError } from 'rxjs';
-import { InsightAssistantApiService } from './services/insight-assistant-api.service';
+import { InsightAssistantApiService, ProviderInfo } from './services/insight-assistant-api.service';
 import { AssistantQueryResponse } from './models/assistant-query-response.model';
 import { ServiceContractEntry } from './models/service-contract.model';
 
@@ -29,6 +29,10 @@ export class InsightAssistantComponent implements OnInit {
   isLoading = false;
   form: FormGroup;
 
+  // Provider selector
+  providers: ProviderInfo[] = [];
+  selectedProvider: string | null = null;
+
   // Service catalogue state
   contracts: ServiceContractEntry[] = [];
   showAddForm = false;
@@ -53,13 +57,19 @@ export class InsightAssistantComponent implements OnInit {
 
   ngOnInit(): void {
     this.api.getContracts().subscribe({ next: c => this.contracts = c });
+    this.api.getProviders().subscribe({
+      next: p => {
+        this.providers = p;
+        this.selectedProvider = p[0]?.id ?? null;
+      }
+    });
   }
 
   runQuery(): void {
     this.error = null;
     this.response = null;
     this.isLoading = true;
-    this.api.query(this.form.value.query || '').pipe(timeout(55000)).subscribe({
+    this.api.query(this.form.value.query || '', this.selectedProvider ?? undefined).pipe(timeout(55000)).subscribe({
       next: (r: AssistantQueryResponse) => { this.response = r; this.isLoading = false; },
       error: (err) => {
         if (err instanceof TimeoutError) {
