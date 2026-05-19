@@ -1,6 +1,14 @@
 [
-  {"studyId":"S1","studyCode":"ST-001","customer":"ABC Pharma","legalEntity":"EU","plannedCompletionDate":"2026-04-10"},
-  {"studyId":"S2","studyCode":"ST-002","customer":"XYZ Labs","legalEntity":"EU","plannedCompletionDate":"2026-04-15"},
-  {"studyId":"S3","studyCode":"ST-003","customer":"BioTest","legalEntity":"US","plannedCompletionDate":"2026-04-20"},
-  {"studyId":"S4","studyCode":"ST-004","customer":"Delta Bio","legalEntity":"EU","plannedCompletionDate":null}
+  {"studyId":"S1", "studyCode":"ST-001", "customer":"ABC Pharma",   "legalEntity":"EU", "plannedCompletionDate":"2026-04-10"},
+  {"studyId":"S2", "studyCode":"ST-002", "customer":"XYZ Labs",     "legalEntity":"EU", "plannedCompletionDate":"2026-04-15"},
+  {"studyId":"S3", "studyCode":"ST-003", "customer":"BioTest",      "legalEntity":"US", "plannedCompletionDate":"2026-04-20"},
+  {"studyId":"S4", "studyCode":"ST-004", "customer":"Delta Bio",    "legalEntity":"EU", "plannedCompletionDate":null},
+  {"studyId":"S5", "studyCode":"ST-005", "customer":"Helix Corp",   "legalEntity":"US", "plannedCompletionDate":"2026-03-31"},
+  {"studyId":"S6", "studyCode":"ST-006", "customer":"GenomeTech",   "legalEntity":"EU", "plannedCompletionDate":"2026-04-05"},
+  {"studyId":"S7", "studyCode":"ST-007", "customer":"ABC Pharma",   "legalEntity":"US", "plannedCompletionDate":"2026-04-25"},
+  {"studyId":"S8", "studyCode":"ST-008", "customer":"NovaClin",     "legalEntity":"EU", "plannedCompletionDate":"2026-04-12"},
+  {"studyId":"S9", "studyCode":"ST-009", "customer":"XYZ Labs",     "legalEntity":"US", "plannedCompletionDate":"2026-05-01"},
+  {"studyId":"S10","studyCode":"ST-010", "customer":"BioTest",      "legalEntity":"EU", "plannedCompletionDate":"2026-04-18"},
+  {"studyId":"S11","studyCode":"ST-011", "customer":"Helix Corp",   "legalEntity":"EU", "plannedCompletionDate":"2026-04-08"},
+  {"studyId":"S12","studyCode":"ST-012", "customer":"GenomeTech",   "legalEntity":"US", "plannedCompletionDate":null}
 ]
