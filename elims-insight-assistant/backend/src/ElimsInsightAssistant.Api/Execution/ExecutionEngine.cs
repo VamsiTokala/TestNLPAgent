@@ -38,8 +38,9 @@ public class ExecutionEngine(IStudyServiceClient studyClient, ICoreLabsServiceCl
 
         var completionByStudy = testPs
             .GroupBy(t => GetStringField(t, rightField))
+            .Where(g => g.Key != null)
             .ToDictionary(
-                g => g.Key,
+                g => g.Key!,
                 g => ApplyDateAggregate(g, aggregate.Field, aggregate.Fn));
 
         // ── Classify each study ───────────────────────────────────────────────
