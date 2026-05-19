@@ -528,6 +528,13 @@ public class OpenRouterPlanGenerator(IConfiguration config, IServiceRegistry reg
                 new ChatCompletionOptions { ResponseFormat = ChatResponseFormat.CreateJsonObjectFormat() },
                 cts.Token);
 
+            if (completion.Value.Content.Count == 0 || string.IsNullOrWhiteSpace(completion.Value.Content[0].Text))
+            {
+                logger.LogWarning("OpenRouter returned an empty response body (possible rate-limit or model unavailable).");
+                return new PlanGeneratorResult(string.Empty, null,
+                    "AI provider returned an empty response — the model may be rate-limited. Try again or switch to Mock.", IsServerError: true);
+            }
+
             var raw = completion.Value.Content[0].Text;
 
             var startIdx = raw.IndexOf('{');
