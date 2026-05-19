@@ -599,6 +599,16 @@ $slate-900:    #0f172a;
 
 .ps-more { font-size: .72rem; color: $slate-400; font-style: italic; }
 
+.ps-check-grid { display: flex; flex-wrap: wrap; gap: .3rem; flex: 1; }
+
+.ps-check-pill {
+  display: inline-flex; align-items: center; gap: .25rem;
+  font-size: .72rem; font-weight: 600;
+  padding: .2rem .55rem; border-radius: 999px;
+  &--pass { background: $green-bg; color: $green-dark; }
+  &--fail { background: $red-bg;   color: $red-dark; }
+}
+
 // ── Alerts ────────────────────────────────────────────────────────────────────
 .alert {
   display: flex;

@@ -204,6 +204,20 @@
         </span>
         <span class="ps-badge ps-badge--muted" *ngIf="psIsDone(3) && response?.status !== 'Completed'">skipped</span>
       </div>
+
+      <!-- Validation checks detail -->
+      <div class="ps-detail" *ngIf="psIsDone(3) && response?.status === 'Completed'">
+        <div class="ps-row">
+          <span class="ps-tag">Checks</span>
+          <div class="ps-check-grid">
+            <span *ngFor="let check of response?.validation?.checks"
+                  class="ps-check-pill"
+                  [ngClass]="check.status === 'Passed' ? 'ps-check-pill--pass' : 'ps-check-pill--fail'">
+              {{ check.status === 'Passed' ? '✓' : '✗' }} {{ check.name }}
+            </span>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="ps-connector"></div>
