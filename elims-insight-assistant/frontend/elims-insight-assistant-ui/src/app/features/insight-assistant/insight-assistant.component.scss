@@ -199,7 +199,7 @@ $slate-900:    #0f172a;
   animation: slideUp .25s ease;
 
   h4 { margin: 0 0 .3rem; font-size: .9rem; font-weight: 700; color: $slate-900; }
-  .add-form-hint { margin: 0 0 .9rem; font-size: .8rem; color: $slate-500; }
+  .add-form-hint { margin: 0 0 .6rem; font-size: .8rem; color: $slate-500; }
 }
 
 .add-form {
@@ -280,6 +280,19 @@ $slate-900:    #0f172a;
   font-size: .8rem; font-weight: 600; color: $green;
   padding: .4rem .6rem; background: $green-bg; border-radius: 6px;
 }
+.add-form-notice {
+  font-size: .78rem;
+  color: #92400e;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-left: 3px solid $amber;
+  border-radius: 6px;
+  padding: .45rem .7rem;
+  margin-bottom: .9rem;
+  line-height: 1.5;
+  code { font-size: .75rem; background: #fef3c7; padding: .1rem .3rem; border-radius: 3px; }
+}
+
 .add-error {
   font-size: .8rem; color: $red;
   padding: .4rem .6rem; background: $red-bg; border-radius: 6px;

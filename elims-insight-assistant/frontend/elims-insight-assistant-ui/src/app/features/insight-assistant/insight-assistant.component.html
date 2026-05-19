@@ -58,9 +58,14 @@
     <div class="add-form-wrap" *ngIf="showAddForm">
       <h4>Register New Service Contract</h4>
       <p class="add-form-hint">
-        Once registered, this contract is immediately added to the AI prompt.
-        The AI will consider it when answering future queries.
+        Once registered, this contract is immediately added to the AI prompt and validator allowlist.
+        The AI will consider it when routing queries and show it as Selected/Unselected in the panel.
       </p>
+      <div class="add-form-notice">
+        <strong>Note:</strong> Registering a contract affects AI routing and validation only.
+        Results data comes from the two built-in services (study-service, corelabs-service).
+        A new service requires backend wiring in <code>ExecutionEngine.cs</code> to return real data.
+      </div>
       <form [formGroup]="addForm" (ngSubmit)="submitAddForm()" class="add-form">
         <div class="form-row">
           <div class="form-field">
