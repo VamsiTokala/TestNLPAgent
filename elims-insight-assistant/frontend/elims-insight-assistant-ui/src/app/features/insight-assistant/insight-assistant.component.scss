@@ -599,6 +599,19 @@ $slate-900:    #0f172a;
 
 .ps-more { font-size: .72rem; color: $slate-400; font-style: italic; }
 
+.ps-slow-hint {
+  margin-top: .5rem;
+  padding: .5rem .75rem;
+  background: $amber-bg;
+  border: 1px solid #fde68a;
+  border-left: 3px solid $amber;
+  border-radius: 6px;
+  font-size: .8rem;
+  color: #92400e;
+  line-height: 1.5;
+  animation: fadeIn .4s ease;
+}
+
 .ps-check-grid { display: flex; flex-wrap: wrap; gap: .3rem; flex: 1; }
 
 .ps-check-pill {

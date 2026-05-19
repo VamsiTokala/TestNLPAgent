@@ -11,20 +11,16 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 var geminiKey     = builder.Configuration["Gemini:ApiKey"];
-var openAiKey     = builder.Configuration["OpenAI:ApiKey"];
 var openRouterKey = builder.Configuration["OpenRouter:ApiKey"];
 
 // Register every available generator — controller picks one per request
 builder.Services.AddSingleton<MockPlanGenerator>();
 if (!string.IsNullOrWhiteSpace(geminiKey))     builder.Services.AddSingleton<GeminiPlanGenerator>();
-if (!string.IsNullOrWhiteSpace(openAiKey))     builder.Services.AddSingleton<OpenAiPlanGenerator>();
 if (!string.IsNullOrWhiteSpace(openRouterKey)) builder.Services.AddSingleton<OpenRouterPlanGenerator>();
 
 // Default generator (used when no provider is specified in the request)
 if (!string.IsNullOrWhiteSpace(geminiKey))
     builder.Services.AddSingleton<IPlanGenerator, GeminiPlanGenerator>();
-else if (!string.IsNullOrWhiteSpace(openAiKey))
-    builder.Services.AddSingleton<IPlanGenerator, OpenAiPlanGenerator>();
 else if (!string.IsNullOrWhiteSpace(openRouterKey))
     builder.Services.AddSingleton<IPlanGenerator, OpenRouterPlanGenerator>();
 else
@@ -45,7 +41,6 @@ app.MapControllers();
 var logger = app.Services.GetRequiredService<ILogger<Program>>();
 var available = new List<string> { "mock" };
 if (!string.IsNullOrWhiteSpace(geminiKey))     available.Add("gemini");
-if (!string.IsNullOrWhiteSpace(openAiKey))     available.Add("openai");
 if (!string.IsNullOrWhiteSpace(openRouterKey)) available.Add("openrouter");
 logger.LogInformation("Available plan generators: {Generators}", string.Join(", ", available));
 

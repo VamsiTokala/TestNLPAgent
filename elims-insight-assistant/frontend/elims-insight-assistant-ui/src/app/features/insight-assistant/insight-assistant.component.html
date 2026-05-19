@@ -162,6 +162,11 @@
         <span class="ps-badge ps-badge--ok"   *ngIf="psIsDone(2) && response?.status === 'Completed'">plan ready</span>
         <span class="ps-badge ps-badge--warn" *ngIf="psIsDone(2) && response?.status !== 'Completed'">unsupported</span>
       </div>
+      <!-- Slow provider hint -->
+      <div class="ps-slow-hint" *ngIf="psIsActive(2) && slowWarning">
+        ⏳ Still waiting on the AI provider — free-tier models can take 30–60 s.
+        You can switch to <strong>Mock</strong> in the provider selector for an instant result.
+      </div>
 
       <!-- AI response detail -->
       <div class="ps-detail" *ngIf="psIsDone(2) && response?.status === 'Completed'">

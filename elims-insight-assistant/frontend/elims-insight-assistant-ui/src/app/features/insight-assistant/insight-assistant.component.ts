@@ -42,6 +42,7 @@ export class InsightAssistantComponent implements OnInit, OnDestroy {
 
   // Pipeline tracker: 0=idle 1=sending 2=generating 3=validating 4=executing 5=complete
   pipelineStep = 0;
+  slowWarning = false;   // shown when step 2 runs > 15 s
   private _pipeTimers: ReturnType<typeof setTimeout>[] = [];
 
   get queryControl(): FormControl { return this.form.get('query') as FormControl; }
@@ -76,10 +77,12 @@ export class InsightAssistantComponent implements OnInit, OnDestroy {
     this.response = null;
     this.isLoading = true;
     this.pipelineStep = 1;
+    this.slowWarning = false;
     this.clearPipeTimers();
 
     const t1 = setTimeout(() => { if (this.isLoading) this.pipelineStep = 2; }, 700);
-    this._pipeTimers.push(t1);
+    const tSlow = setTimeout(() => { if (this.isLoading && this.pipelineStep === 2) this.slowWarning = true; }, 15000);
+    this._pipeTimers.push(t1, tSlow);
 
     this.api.query(this.form.value.query || '', this.selectedProvider ?? undefined).pipe(timeout(55000)).subscribe({
       next: (r: AssistantQueryResponse) => {
@@ -96,11 +99,15 @@ export class InsightAssistantComponent implements OnInit, OnDestroy {
         this._pipeTimers.push(t2);
       },
       error: (err) => {
+        this.clearPipeTimers();
         this.pipelineStep = 0;
+        this.slowWarning = false;
         if (err instanceof TimeoutError) {
-          this.error = 'Request timed out. The AI provider can be slow — please try again in a moment.';
+          this.error = 'Request timed out after 55 s. Free-tier providers can be slow — try again or switch to Mock.';
+        } else if (err?.status === 500) {
+          this.error = 'Server error — check the backend console for details. The AI response may have had an unexpected format.';
         } else {
-          this.error = err?.error?.message ?? err?.error?.errors?.join(', ') ?? err?.error?.title ?? 'An unexpected error occurred.';
+          this.error = err?.error?.message ?? err?.error?.errors?.join(', ') ?? err?.error?.title ?? `Unexpected error (HTTP ${err?.status ?? '?'}).`;
         }
         this.isLoading = false;
       }
