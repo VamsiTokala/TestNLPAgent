@@ -76,8 +76,13 @@
    Retrievable via GET /api/assistant/audit/{traceId}
         ↓
 8. HTTP 200 → Angular renders:
-   ├── AI Interpretation panel
-   │     ├── Provider badge (Gemini 2.5 Flash / GPT-4o Mini / Mock)
+   ├── Pipeline Tracker (persists after query — transparent view of every stage)
+   │     ├── ① Sending query → provider name badge when done
+   │     ├── ② AI generating plan → expands: intent · selected services + reasons · classification filter
+   │     ├── ③ Validating → expands: every check pill (pass/fail) by name
+   │     └── ④ Executing → expands: services called · summary counts · first 3 result previews
+   ├── AI Interpretation panel (full detail, appears after tracker completes)
+   │     ├── Provider badge (Gemini 2.5 Flash / GPT-4o Mini / OpenRouter / Mock)
    │     ├── Intent Detected badge
    │     ├── Classification Filter rows (included / excluded per classification)
    │     ├── Service Contract Selection pipeline with per-operation AI reason
@@ -87,8 +92,8 @@
    ├── Generated Plan (Markdown)
    └── JSON Execution Plan (collapsible)
 
-   If status = "UnsupportedQuery" → shows reason message, no plan/results rendered.
-   If HTTP 4xx/5xx → shows error banner.
+   If status = "UnsupportedQuery" → tracker step ② shows reason, steps ③–④ show "skipped".
+   If HTTP 4xx/5xx → shows error banner, tracker resets.
 ```
 
 **The core safety property:** The LLM output is a JSON plan *proposal*. Nothing executes until the
@@ -315,13 +320,27 @@ the current set of registered contracts.
 
 ---
 
+## Pipeline Tracker — Real-Time AI Evaluation View
+
+After clicking **Run Query**, a 4-step pipeline tracker appears and persists after completion:
+
+| Step | While running | Expanded detail when done |
+|---|---|---|
+| ① Sending query to AI provider | pulsing dots | Provider name badge |
+| ② AI generating execution plan | pulsing dots | Intent · selected services + AI reasons · classification filter choices |
+| ③ Validating plan against allowlist | pulsing dots | Every validation check by name (pass ✓ / fail ✗ pill) |
+| ④ Executing against services | pulsing dots | Services called · On Time / Delayed / Indeterminate counts · first 3 result rows preview |
+
+Steps 3 and 4 flash in (400 ms each) on response arrival before the full response panels appear.
+For unsupported queries step ② shows the AI's reason and steps ③–④ show "skipped".
+
 ## AI Interpretation Panel — What the UI Shows
 
-After a query runs, the AI Interpretation panel reveals the LLM's reasoning in real time:
+After the tracker completes, the full **AI Interpretation panel** renders with the same data in a richer layout:
 
 | Section | What it shows |
 |---|---|
-| **Provider badge** | Which generator was used (Gemini 2.5 Flash / GPT-4o Mini / Mock) |
+| **Provider badge** | Which generator was used (Gemini 2.5 Flash / GPT-4o Mini / OpenRouter / Mock) |
 | **Intent Detected** | The `intent` string from the plan (e.g. `find_studies_not_completed_on_time`) |
 | **Classification Filter** | All three classifications with "included" / "excluded" status based on `output.includeClassifications` |
 | **Service Contract Selection** | Each selected operation as a pipeline card showing service name, action tag, and the AI's per-operation `reason` |

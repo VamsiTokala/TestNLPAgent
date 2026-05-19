@@ -171,10 +171,16 @@ After a query runs, cards light up with "✓ Selected" or dim to show which serv
 A **Provider Selector** appears when more than one AI provider key is configured, letting you
 switch between Gemini / OpenAI / OpenRouter / Mock per-query.
 
-**AI Interpretation panel** (appears after Run Query):
-- **Provider badge** — which generator was used (Gemini 2.5 Flash / GPT-4o Mini / Mock)
+**Pipeline Tracker** (appears immediately on Run Query, stays visible after completion):
+- **① Sending** — shows provider name when sent
+- **② AI plan** — expands to show intent, selected services + AI reasons, classification filter
+- **③ Validation** — expands to show every check pill by name (Plan completeness, Service allowlist, Field allowlist, Read-only execution, …)
+- **④ Execution** — expands to show services called, On Time / Delayed / Indeterminate counts, first 3 result previews
+
+**AI Interpretation panel** (full detail view, appears after tracker completes):
+- **Provider badge** — which generator was used (Gemini 2.5 Flash / GPT-4o Mini / OpenRouter / Mock)
 - **Intent Detected** — the `intent` string extracted from the query
-- **Classification Filter** — all three classifications (On Time / Delayed / Indeterminate) shown as "included" or "excluded" based on what the AI chose
+- **Classification Filter** — all three classifications shown as "included" or "excluded" based on what the AI chose
 - **Service Contract Selection** — pipeline cards for each selected service with the AI's per-operation reason
 - **Validation** — pass/fail pill for every validator check
 
