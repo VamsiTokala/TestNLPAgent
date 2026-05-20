@@ -81,18 +81,18 @@ public record ExecutionPlan
 
 public record PlanOperation(string Service, string Action, List<string> Select, List<PlanFilter> Filters, string? Reason = null);
 public record PlanFilter(string Field, string Op, string? Value);
-public record PlanCorrelate(string LeftEntity = "study", string RightEntity = "testp", string LeftField = "studyId", string RightField = "studyId");
+public record PlanCorrelate(string LeftEntity = "", string RightEntity = "", string LeftField = "", string RightField = "");
 public record PlanTransform(List<string>? GroupBy = null, List<PlanAggregate>? Aggregates = null)
 {
-    public List<string> GroupBy { get; init; } = GroupBy ?? ["studyId"];
-    public List<PlanAggregate> Aggregates { get; init; } = Aggregates ?? [new("completedAt", "max", "actualCompletionDate")];
+    public List<string> GroupBy { get; init; } = GroupBy ?? [];
+    public List<PlanAggregate> Aggregates { get; init; } = Aggregates ?? [];
 }
 public record PlanAggregate(string Field, string Fn, string As);
 public record PlanClassificationRules(string OnTime = "actualCompletionDate <= plannedCompletionDate", string Delayed = "actualCompletionDate > plannedCompletionDate", string Indeterminate = "plannedCompletionDate is null OR actualCompletionDate is null");
 public record PlanOutput(List<string>? IncludeClassifications = null, List<string>? Columns = null)
 {
-    public List<string> IncludeClassifications { get; init; } = IncludeClassifications ?? ["Delayed", "Indeterminate"];
-    public List<string> Columns { get; init; } = Columns ?? ["studyId", "studyCode", "customer", "plannedCompletionDate", "actualCompletionDate", "classification", "reason", "dataQualityFlags"];
+    public List<string> IncludeClassifications { get; init; } = IncludeClassifications ?? [];
+    public List<string> Columns { get; init; } = Columns ?? [];
 }
 public record PlanLimits(int MaxRows, bool Pagination);
 

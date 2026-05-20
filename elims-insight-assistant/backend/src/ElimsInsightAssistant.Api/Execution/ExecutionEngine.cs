@@ -1,6 +1,9 @@
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using ElimsInsightAssistant.Api.Models;
 using ElimsInsightAssistant.Api.Services;
+
+[assembly: InternalsVisibleTo("ElimsInsightAssistant.Tests")]
 
 namespace ElimsInsightAssistant.Api.Execution;
 
@@ -18,14 +21,12 @@ public interface IExecutionEngine
 public class ExecutionEngine : IExecutionEngine
 {
     private readonly Dictionary<string, Func<Task<IEnumerable<object>>>> _dataSources;
-    private readonly IClassificationService _classifier;
 
     public ExecutionEngine(
         IStudyServiceClient studyClient,
         ICoreLabsServiceClient coreLabsClient,
         IProtocolServiceClient protocolClient,
-        ISampleServiceClient sampleClient,
-        IClassificationService classifier)
+        ISampleServiceClient sampleClient)
     {
         _dataSources = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -34,13 +35,12 @@ public class ExecutionEngine : IExecutionEngine
             ["protocol-service"] = async () => (await protocolClient.ListProtocolsAsync()).Cast<object>(),
             ["sample-service"]   = async () => (await sampleClient.ListSamplesAsync()).Cast<object>()
         };
-        _classifier = classifier;
     }
 
     public async Task<ExecutionOutput> ExecuteAsync(ExecutionPlan plan, UserContext userContext)
     {
-        if (!userContext.Roles.Contains("StudyViewer") || !userContext.Roles.Contains("CoreLabsViewer"))
-            throw new UnauthorizedAccessException("User lacks required roles.");
+        if (userContext.Roles.Count == 0)
+            throw new UnauthorizedAccessException("User has no assigned roles.");
 
         // ── Fetch & filter every contract referenced in the plan ──────────────
         var rawByService = new Dictionary<string, List<object>>(StringComparer.OrdinalIgnoreCase);
@@ -51,13 +51,16 @@ public class ExecutionEngine : IExecutionEngine
             rawByService[op.Service] = data;
         }
 
-        // ── Apply legal-entity authorization to studies ───────────────────────
-        if (rawByService.TryGetValue("study-service", out var studyObjs))
+        // ── Apply legal-entity authorization to any service whose records carry
+        //    a legalEntity field (generic — works for any future contract too) ──
+        foreach (var key in rawByService.Keys.ToList())
         {
-            rawByService["study-service"] = studyObjs
-                .Cast<StudyDto>()
-                .Where(s => userContext.LegalEntities.Contains(s.LegalEntity))
-                .Cast<object>()
+            rawByService[key] = rawByService[key]
+                .Where(obj =>
+                {
+                    var le = GetStringField(obj, "legalEntity");
+                    return le is null || userContext.LegalEntities.Contains(le);
+                })
                 .ToList();
         }
 
@@ -66,49 +69,118 @@ public class ExecutionEngine : IExecutionEngine
             kvp => kvp.Key,
             kvp => kvp.Value.Select(ToDict).ToList());
 
-        // ── If this is a timeliness query (studies + testps both present and
-        //    classifications requested), run the classification flow ─────────
+        // ── If this is a timeliness query, detect left/right services by field
+        //    presence and run a generic classification flow ────────────────────
         var rows = new List<StudyCompletionResult>();
         var summary = new QuerySummary();
 
         var wantsClassification = plan.Output.IncludeClassifications.Count > 0;
-        if (wantsClassification &&
-            rawByService.TryGetValue("study-service", out var sObjs) &&
-            rawByService.TryGetValue("corelabs-service", out var tObjs))
+        if (wantsClassification)
         {
-            var studies = sObjs.Cast<StudyDto>().ToList();
-            var testps  = tObjs.Cast<TestPDto>().ToList();
+            var aggregate = plan.Transform.Aggregates.FirstOrDefault()
+                            ?? new PlanAggregate("completedAt", "max", "actualCompletionDate");
 
-            var rightField = plan.Correlate?.RightField ?? "studyId";
-            var aggregate  = plan.Transform?.Aggregates?.FirstOrDefault()
-                             ?? new PlanAggregate("completedAt", "max", "actualCompletionDate");
+            // Left = service whose records have plannedCompletionDate
+            // Right = a different service whose records have the aggregate source field
+            var leftService  = FindServiceWithField(rawByService, "plannedCompletionDate");
+            var rightService = FindServiceWithField(rawByService, aggregate.Field, excluding: leftService);
 
-            var completionByStudy = testps
-                .GroupBy(t => GetStringField(t, rightField))
-                .Where(g => g.Key != null)
-                .ToDictionary(
-                    g => g.Key!,
-                    g => ApplyDateAggregate(g.Cast<object>(), aggregate.Field, aggregate.Fn));
-
-            var allClassified = studies.Select(s =>
+            if (leftService != null && rightService != null)
             {
-                completionByStudy.TryGetValue(s.StudyId, out var actual);
-                return _classifier.Classify(s, actual);
-            }).ToList();
+                var leftRows  = rawByService[leftService];
+                var rightRows = rawByService[rightService];
 
-            summary = new QuerySummary(
-                allClassified.Count(r => r.Classification == "On Time"),
-                allClassified.Count(r => r.Classification == "Delayed"),
-                allClassified.Count(r => r.Classification == "Indeterminate"));
+                var leftIdField  = !string.IsNullOrEmpty(plan.Correlate.LeftField)  ? plan.Correlate.LeftField  : "studyId";
+                var rightIdField = !string.IsNullOrEmpty(plan.Correlate.RightField) ? plan.Correlate.RightField : leftIdField;
 
-            rows = allClassified
-                .Where(r => plan.Output.IncludeClassifications.Contains(r.Classification))
-                .Take(plan.Limits.MaxRows)
-                .ToList();
+                var completionByKey = rightRows
+                    .GroupBy(r => GetStringField(r, rightIdField))
+                    .Where(g => g.Key != null)
+                    .ToDictionary(g => g.Key!, g => ApplyDateAggregate(g.Cast<object>(), aggregate.Field, aggregate.Fn));
+
+                var allClassified = leftRows.Select(s =>
+                {
+                    var key = GetStringField(s, leftIdField);
+                    completionByKey.TryGetValue(key ?? "", out var actual);
+                    return ClassifyRecord(s, actual, leftIdField);
+                }).ToList();
+
+                summary = new QuerySummary(
+                    allClassified.Count(r => r.Classification == "On Time"),
+                    allClassified.Count(r => r.Classification == "Delayed"),
+                    allClassified.Count(r => r.Classification == "Indeterminate"));
+
+                rows = allClassified
+                    .Where(r => plan.Output.IncludeClassifications.Contains(r.Classification))
+                    .Take(plan.Limits.MaxRows)
+                    .ToList();
+            }
         }
 
         var servicesCalled = plan.Operations.Select(o => o.Service).Distinct().ToList();
         return new ExecutionOutput(summary, rows, datasets, servicesCalled);
+    }
+
+    // ── Generic classification using reflection ───────────────────────────────
+
+    internal static StudyCompletionResult ClassifyRecord(object left, DateTime? actual, string idField)
+    {
+        var id       = GetStringField(left, idField) ?? GetStringField(left, "id") ?? "";
+        var code     = GetStringField(left, "studyCode") ?? GetStringField(left, "code") ?? id;
+        var customer = GetStringField(left, "customer") ?? "";
+        var planned  = left.GetType().GetProperty("plannedCompletionDate", PropFlags)?.GetValue(left) as DateTime?;
+
+        var flags  = new List<string>();
+        string classification, reason;
+
+        if (planned is null)
+        {
+            classification = "Indeterminate";
+            reason = "Planned completion date is missing.";
+            flags.Add("missing_planned_completion_date");
+        }
+        else if (actual is null)
+        {
+            classification = "Indeterminate";
+            reason = "No actual completion timestamp found.";
+            flags.Add("no_actual_completion");
+        }
+        else if (actual > planned)
+        {
+            classification = "Delayed";
+            var days = (actual.Value.Date - planned.Value.Date).Days;
+            reason = $"Actual completion is {days} day(s) after planned.";
+        }
+        else
+        {
+            classification = "On Time";
+            reason = "Actual completion is on or before planned.";
+        }
+
+        return new StudyCompletionResult
+        {
+            StudyId               = id,
+            StudyCode             = code,
+            Customer              = customer,
+            PlannedCompletionDate = planned,
+            ActualCompletionDate  = actual,
+            Classification        = classification,
+            Reason                = reason,
+            DataQualityFlags      = flags
+        };
+    }
+
+    // Returns the first service name (not in 'excluding') whose records have the given field.
+    private static string? FindServiceWithField(
+        Dictionary<string, List<object>> byService,
+        string fieldName,
+        string? excluding = null)
+    {
+        return byService
+            .Where(kvp => kvp.Key != excluding && kvp.Value.Count > 0)
+            .FirstOrDefault(kvp =>
+                kvp.Value[0].GetType().GetProperty(fieldName, PropFlags) != null)
+            .Key;
     }
 
     // ── Filters ───────────────────────────────────────────────────────────────
