@@ -43,6 +43,9 @@ export class InsightAssistantComponent implements OnInit {
   get allValidationPassed(): boolean {
     return this.response?.validation?.checks?.every(c => c.status === 'Passed') ?? false;
   }
+  get selectedServicesCount(): number {
+    return new Set(this.response?.jsonPlan?.operations?.map(op => op.service) ?? []).size;
+  }
 
   constructor(private fb: FormBuilder, private api: InsightAssistantApiService, private zone: NgZone) {
     this.form = this.fb.group({ query: ['Find studies not completed on time'] });
@@ -125,12 +128,14 @@ export class InsightAssistantComponent implements OnInit {
     };
     this.api.registerContract(entry).subscribe({
       next: (updated) => {
-        this.contracts = updated;
-        this.addSuccess = true;
-        this.addForm.reset({ isRequired: false });
-        setTimeout(() => { this.addSuccess = false; this.showAddForm = false; }, 1800);
+        this.zone.run(() => {
+          this.contracts = updated;
+          this.addSuccess = true;
+          this.addForm.reset({ isRequired: false });
+          setTimeout(() => { this.addSuccess = false; this.showAddForm = false; }, 1800);
+        });
       },
-      error: (err) => { this.addError = err?.error ?? 'Failed to register contract.'; }
+      error: (err) => { this.zone.run(() => { this.addError = err?.error ?? 'Failed to register contract.'; }); }
     });
   }
 
