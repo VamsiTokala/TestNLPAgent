@@ -523,7 +523,8 @@ public class OpenRouterPlanGenerator(IConfiguration config, IServiceRegistry reg
             PromptBuilder.CoreInstructions(registry.GetAll()) +
             "\n\nRespond ONLY with a valid JSON object — no markdown fences, no trailing text.\n" +
             "For a supported query set supported=true and populate plan.\n" +
-            "For an unsupported query set supported=false, set reason, and set markdown and plan to null.";
+            "For an unsupported query set supported=false, set reason, and set markdown and plan to null.\n" +
+            "IMPORTANT: Keep the markdown field to ONE short sentence (max 20 words). Do not write bullet points or steps.";
 
         logger.LogInformation("OpenRouter ({Model}) → query: {Query}", _model, query);
         logger.LogInformation("OpenRouter → system prompt:\n{Prompt}", systemPrompt);
@@ -537,7 +538,11 @@ public class OpenRouterPlanGenerator(IConfiguration config, IServiceRegistry reg
 
                 var completion = await _client.CompleteChatAsync(
                     [new SystemChatMessage(systemPrompt), new UserChatMessage(query)],
-                    new ChatCompletionOptions { ResponseFormat = ChatResponseFormat.CreateJsonObjectFormat() },
+                    new ChatCompletionOptions
+                    {
+                        ResponseFormat = ChatResponseFormat.CreateJsonObjectFormat(),
+                        MaxOutputTokenCount = 1024
+                    },
                     cts.Token);
 
                 if (completion.Value.Content.Count == 0 || string.IsNullOrWhiteSpace(completion.Value.Content[0].Text))
