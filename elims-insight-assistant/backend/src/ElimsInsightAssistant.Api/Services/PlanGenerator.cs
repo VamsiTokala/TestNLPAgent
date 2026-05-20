@@ -75,19 +75,24 @@ CLASSIFICATION RULES:
 - "Delayed": actualCompletionDate > plannedCompletionDate (both dates present)
 - "Indeterminate": plannedCompletionDate is null OR actualCompletionDate is null
 
-SUPPORTED QUERY TYPES (set supported = true):
-- Studies not completed on time: delayed, overdue, late, missed deadline
-- Indeterminate studies: missing planned or actual completion date
-- Filter/show studies by classification: "filter studies with classification X",
-  "show delayed studies", "show indeterminate studies", "show on time studies"
-- Any combination of the above classifications
+THIS SYSTEM answers questions about study completion timeliness. It can:
+- Classify studies as On Time, Delayed, or Indeterminate
+- Filter or show studies by any combination of those classifications
+- Count or summarise studies across classifications
 
-SET output.includeClassifications based on the query intent:
-- "show delayed studies" or "not completed on time" or "late" → ["Delayed", "Indeterminate"]
-- "show only delayed" or "filter studies with classification Delayed" → ["Delayed"]
-- "show only indeterminate" or "filter studies with classification Indeterminate" → ["Indeterminate"]
-- "show on time studies" or "filter studies with classification On Time" → ["On Time"]
-- "show all studies" or all three classifications requested → ["On Time", "Delayed", "Indeterminate"]
+Set supported=true if the user's question can reasonably be answered using
+study completion data — regardless of how it is phrased. You are an AI; use
+your understanding of intent, not keyword matching.
+
+Set supported=false only when the query is clearly outside this domain
+(e.g. weather, HR, invoices, lab equipment unrelated to study completion).
+
+SET output.includeClassifications to the smallest set that fully answers the intent:
+- Intent is "problems / not on time / at risk / delayed" → ["Delayed", "Indeterminate"]
+- Intent is specifically and only "delayed studies" → ["Delayed"]
+- Intent is specifically and only "indeterminate / missing data" → ["Indeterminate"]
+- Intent is "successful / on time / met deadline" → ["On Time"]
+- Intent is a broad overview, count, all studies, or unclear → ["On Time", "Delayed", "Indeterminate"]
 
 FOR EACH SELECTED OPERATION, provide a brief "reason" explaining why that service
 is needed to answer this specific query.
@@ -114,27 +119,12 @@ If the query is NOT about study completion timeliness:
 
 public class MockPlanGenerator(IServiceRegistry registry, ILogger<MockPlanGenerator> logger) : IPlanGenerator
 {
-    public string ProviderName => "Mock (keyword matching)";
-
-    private static readonly string[] SupportedTerms =
-    [
-        "not completed on time", "delayed studies", "completed late", "not on time",
-        "indeterminate", "classification indeterminate", "classification delayed",
-        "classification on time", "filter studies with classification",
-        "show delayed", "show indeterminate", "show on time", "show all studies"
-    ];
+    public string ProviderName => "Mock";
 
     public Task<PlanGeneratorResult> GenerateAsync(string query)
     {
         var q = query.ToLowerInvariant();
-        logger.LogInformation("Mock → evaluating query: {Query}", query);
-        if (!SupportedTerms.Any(q.Contains))
-        {
-            logger.LogInformation("Mock ← no keyword match — unsupported");
-            return Task.FromResult(new PlanGeneratorResult(
-                string.Empty, null,
-                "This demo currently supports queries related to study completion timeliness."));
-        }
+        logger.LogInformation("Mock → query: {Query}", query);
 
         var classifications = ResolveClassifications(q);
         var contracts = registry.GetAll();
@@ -187,21 +177,41 @@ Read-only, deterministic, approved service contracts only.
 
     private static List<string> ResolveClassifications(string q)
     {
+        // Exact classification filter
         if (q.Contains("classification indeterminate")) return ["Indeterminate"];
         if (q.Contains("classification delayed"))       return ["Delayed"];
         if (q.Contains("classification on time"))       return ["On Time"];
 
-        if (q.Contains("show all studies") ||
-            (q.Contains("on time") && q.Contains("delayed") && q.Contains("indeterminate")))
-            return ["On Time", "Delayed", "Indeterminate"];
+        // Overview / all-studies queries
+        bool isOverview = q.Contains("all studies") || q.Contains("show all") ||
+                          q.Contains("list studies") || q.Contains("find studies") ||
+                          q.Contains("how many") || q.Contains("study count") ||
+                          q.Contains("total studies") || q.Contains("study status") ||
+                          q.Contains("study summary") || q.Contains("breakdown") ||
+                          q.Contains("overview") || q.Contains("dashboard") ||
+                          q.Contains("which studies");
+        if (isOverview) return ["On Time", "Delayed", "Indeterminate"];
 
-        // "not on time" / "not completed on time" means the user wants all non-on-time studies.
-        // Keep this separate so "on time" is not treated as a positive request in those phrases.
-        bool notOnTime = q.Contains("not on time") || q.Contains("not completed on time");
+        // "not on time" negation — must check before plain "on time"
+        bool notOnTime = q.Contains("not on time") || q.Contains("not completed on time") ||
+                         q.Contains("haven't finished") || q.Contains("not finished");
 
-        bool wantsOnTime        = q.Contains("on time") && !notOnTime;
-        bool wantsDelayed       = q.Contains("delayed") || q.Contains("completed late") || notOnTime;
-        bool wantsIndeterminate = q.Contains("indeterminate") || notOnTime;
+        bool wantsDelayed = q.Contains("delayed") || q.Contains("overdue") ||
+                            q.Contains("late") || q.Contains("past due") ||
+                            q.Contains("behind") || q.Contains("at risk") ||
+                            q.Contains("missed deadline") || q.Contains("exceeded deadline") ||
+                            q.Contains("need attention") || q.Contains("problematic") ||
+                            q.Contains("still open") || notOnTime;
+
+        bool wantsIndeterminate = q.Contains("indeterminate") || q.Contains("missing date") ||
+                                  q.Contains("no completion date") || q.Contains("without date") ||
+                                  q.Contains("unknown status") || q.Contains("incomplete data") ||
+                                  notOnTime;
+
+        bool wantsOnTime = (q.Contains("on time") || q.Contains("met deadline") ||
+                            q.Contains("ahead of schedule") || q.Contains("finished early") ||
+                            q.Contains("completed early") || q.Contains("within deadline"))
+                           && !notOnTime;
 
         var result = new List<string>(3);
         if (wantsOnTime)        result.Add("On Time");
