@@ -63,56 +63,72 @@ internal static class PromptBuilder
     {
         var servicesBlock = ServicesBlock(contracts);
         return $"""
-REGISTERED SERVICE CONTRACTS (select only those needed to answer the query):
+REGISTERED SERVICE CONTRACTS — these are the only data sources available:
 {servicesBlock}
 
 ALLOWED FILTER OPERATORS: =, !=, >, >=, <, <=, in, between, is null, is not null
 ALLOWED AGGREGATE FUNCTIONS: max, min, count, sum, avg
 MAX ROWS LIMIT: 500
 
-CLASSIFICATION RULES:
-- "On Time": actualCompletionDate <= plannedCompletionDate (both dates present)
-- "Delayed": actualCompletionDate > plannedCompletionDate (both dates present)
-- "Indeterminate": plannedCompletionDate is null OR actualCompletionDate is null
+DOMAIN
+This assistant answers questions using the contracts above. It can:
+- Query any single contract (studies, testps, protocols, samples, etc.)
+- JOIN contracts together (most commonly studies ↔ testps via studyId, but any
+  contract can be joined to another on a shared field)
+- Filter, count, aggregate, or summarise across one or many contracts
+- Apply timeliness classification when the query is about study completion
 
-THIS SYSTEM answers questions about study completion timeliness using the registered
-service contracts above (studies, testps, protocols, samples, or any combination).
+CLASSIFICATION RULES (apply ONLY when the query is about whether studies were
+completed on time — otherwise leave classifications as a passthrough):
+- "On Time":        actualCompletionDate <= plannedCompletionDate (both present)
+- "Delayed":        actualCompletionDate >  plannedCompletionDate (both present)
+- "Indeterminate":  plannedCompletionDate is null OR actualCompletionDate is null
 
-RULE: Set supported=true if the query involves any entity from the registered
-contracts — studies, testps, protocols, samples — in any phrasing or combination.
-This includes counting, listing, finding, summarising, correlating, or filtering
-across one or more contracts.
+SUPPORTED = TRUE for any query that can be answered using one or more registered
+contracts. Examples:
+- Single-contract:  "list active protocols", "show samples from last week",
+                    "count testps with status Completed"
+- Multi-contract:   "studies with their latest testp completion",
+                    "protocols and the studies that use them",
+                    "samples with their study customer"
+- Timeliness:       "delayed studies", "studies not on time", "study summary"
+- Counts/overview:  "how many studies", "study breakdown", "total testps"
 
-Set supported=false ONLY when the query has nothing to do with any registered
-contract (e.g. weather, invoices, employee HR records, unrelated lab equipment).
+SUPPORTED = FALSE only when the query is about something no registered contract
+covers (weather, invoices, HR records, unrelated equipment, recipes, etc.).
 
-SELECT OPERATIONS: include every contract whose data is needed to answer the query.
-For queries spanning multiple entities (e.g. "studies with testp results"), include
-all relevant contracts and explain each one's role in the reason field.
+BUILDING THE PLAN
+- Include every contract whose data is needed. For joins, include BOTH sides.
+- Set correlate.leftEntity / rightEntity / leftField / rightField to describe
+  the join (default for study+testp: leftEntity="study", rightEntity="testp",
+  leftField="studyId", rightField="studyId").
+- Set intent to a short snake_case verb-phrase that reflects what the user asked
+  — NOT a fixed string. Examples:
+    "find_studies_not_completed_on_time"
+    "list_active_protocols"
+    "count_testps_per_study"
+    "show_samples_with_study_customer"
+- Set output.includeClassifications:
+    delayed/late/overdue/at-risk/not-on-time/behind  → ["Delayed", "Indeterminate"]
+    only delayed                                     → ["Delayed"]
+    only indeterminate / missing data                → ["Indeterminate"]
+    on time / met deadline / finished early          → ["On Time"]
+    all / count / overview / non-timeliness query    → ["On Time", "Delayed", "Indeterminate"]
+- For EACH operation, fill "reason" with a short sentence explaining why that
+  contract is needed for THIS query (mention join role if applicable).
 
-SET output.includeClassifications to the smallest set that fully answers the intent:
-- "problems / not on time / at risk / delayed / overdue" → ["Delayed", "Indeterminate"]
-- specifically only delayed → ["Delayed"]
-- specifically only indeterminate / missing data → ["Indeterminate"]
-- "on time / successful / met deadline" → ["On Time"]
-- broad / count / all / overview / unclear / involves testps or other contracts → ["On Time", "Delayed", "Indeterminate"]
+OUTPUT
+If supported = true:
+  - reason   = null
+  - markdown = ONE short sentence describing the plan (no bullets, no steps)
+  - plan     = fully populated: intent, entities, operations (each with reason),
+               correlate (for joins), output.includeClassifications, limits
+  - Never leave intent, entities, or operations blank when supported = true.
 
-FOR EACH SELECTED OPERATION, provide a brief "reason" explaining why that service
-is needed to answer this specific query.
-
-If the query involves any registered contract (studies, testps, protocols, samples):
-  - Set supported = true, reason = null
-  - Set markdown to one short sentence describing the plan
-  - Populate plan with version "1.0", intent "find_studies_not_completed_on_time",
-    the required service operations with reasons, output.includeClassifications,
-    and limits maxRows 500
-  - IMPORTANT: intent, entities, and operations MUST all be fully populated.
-    Never return blank intent or empty operations when supported=true.
-
-If the query has nothing to do with any registered contract:
-  - Set supported = false
-  - Set reason to a one-sentence explanation
-  - Set markdown = null and plan = null
+If supported = false:
+  - reason   = one short sentence explaining why the query is outside the domain
+  - markdown = null
+  - plan     = null
 """;
     }
 }
