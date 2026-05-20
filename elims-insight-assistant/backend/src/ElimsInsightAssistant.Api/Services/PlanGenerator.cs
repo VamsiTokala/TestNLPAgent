@@ -515,97 +515,123 @@ public class OpenRouterPlanGenerator(IConfiguration config, IServiceRegistry reg
 
     public async Task<PlanGeneratorResult> GenerateAsync(string query)
     {
+        const int maxAttempts = 3;
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
-        try
+
+        var systemPrompt =
+            "You are a governed analytics plan generator for a laboratory information management system (LIMS).\n\n" +
+            PromptBuilder.CoreInstructions(registry.GetAll()) +
+            "\n\nRespond ONLY with a valid JSON object — no markdown fences, no trailing text.\n" +
+            "For a supported query set supported=true and populate plan.\n" +
+            "For an unsupported query set supported=false, set reason, and set markdown and plan to null.\n" +
+            "IMPORTANT: Keep the markdown field to ONE short sentence (max 20 words). Do not write bullet points or steps.";
+
+        logger.LogInformation("OpenRouter ({Model}) → query: {Query}", _model, query);
+        logger.LogInformation("OpenRouter → system prompt:\n{Prompt}", systemPrompt);
+
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
-            var systemPrompt =
-                "You are a governed analytics plan generator for a laboratory information management system (LIMS).\n\n" +
-                PromptBuilder.CoreInstructions(registry.GetAll()) +
-                "\n\nRespond ONLY with a valid JSON object — no markdown fences, no trailing text.\n" +
-                "For a supported query set supported=true and populate plan.\n" +
-                "For an unsupported query set supported=false, set reason, and set markdown and plan to null.";
-
-            logger.LogInformation("OpenRouter ({Model}) → query: {Query}", _model, query);
-            logger.LogInformation("OpenRouter → system prompt:\n{Prompt}", systemPrompt);
-            logger.LogInformation("OpenRouter → user message: {Query}", query);
-
-            var completion = await _client.CompleteChatAsync(
-                [new SystemChatMessage(systemPrompt), new UserChatMessage(query)],
-                new ChatCompletionOptions { ResponseFormat = ChatResponseFormat.CreateJsonObjectFormat() },
-                cts.Token);
-
-            if (completion.Value.Content.Count == 0 || string.IsNullOrWhiteSpace(completion.Value.Content[0].Text))
+            try
             {
-                logger.LogWarning("OpenRouter returned an empty response body (possible rate-limit or model unavailable).");
+                if (attempt > 1)
+                    logger.LogWarning("OpenRouter → retry attempt {Attempt}/{Max} for query: {Query}", attempt, maxAttempts, query);
+
+                var completion = await _client.CompleteChatAsync(
+                    [new SystemChatMessage(systemPrompt), new UserChatMessage(query)],
+                    new ChatCompletionOptions
+                    {
+                        ResponseFormat = ChatResponseFormat.CreateJsonObjectFormat(),
+                        MaxOutputTokenCount = 1024
+                    },
+                    cts.Token);
+
+                if (completion.Value.Content.Count == 0 || string.IsNullOrWhiteSpace(completion.Value.Content[0].Text))
+                {
+                    logger.LogWarning("OpenRouter returned an empty response body (attempt {Attempt}).", attempt);
+                    if (attempt < maxAttempts) continue;
+                    return new PlanGeneratorResult(string.Empty, null,
+                        "AI provider returned an empty response — the model may be rate-limited. Try again or switch to Mock.", IsServerError: true);
+                }
+
+                var raw = completion.Value.Content[0].Text;
+                logger.LogInformation("OpenRouter ← raw response (attempt {Attempt}):\n{Raw}", attempt, raw);
+
+                var startIdx = raw.IndexOf('{');
+                var endIdx   = raw.LastIndexOf('}');
+                if (startIdx < 0 || endIdx <= startIdx)
+                {
+                    logger.LogWarning("OpenRouter response contained no JSON object (attempt {Attempt}). Raw: {Raw}", attempt, raw);
+                    if (attempt < maxAttempts) continue;
+                    return new PlanGeneratorResult(string.Empty, null,
+                        "Plan generation service returned an unreadable response.", IsServerError: true);
+                }
+                var json = raw[startIdx..(endIdx + 1)];
+
+                JsonDocument doc;
+                try { doc = JsonDocument.Parse(json); }
+                catch (JsonException ex)
+                {
+                    logger.LogWarning(ex, "OpenRouter JSON parse failed (attempt {Attempt}). Raw: {Json}", attempt, json);
+                    if (attempt < maxAttempts) continue;
+                    return new PlanGeneratorResult(string.Empty, null,
+                        "Plan generation service returned an unreadable response.", IsServerError: true);
+                }
+
+                using (doc)
+                {
+                    var root = doc.RootElement;
+
+                    if (!root.GetProperty("supported").GetBoolean())
+                    {
+                        var reason = root.GetProperty("reason").GetString()
+                                     ?? "Query not supported by this assistant.";
+                        return new PlanGeneratorResult(string.Empty, null, reason);
+                    }
+
+                    var markdown = root.GetProperty("markdown").GetString() ?? string.Empty;
+                    var plan = JsonSerializer.Deserialize<ExecutionPlan>(
+                        root.GetProperty("plan").GetRawText(),
+                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+                    if (plan is null)
+                    {
+                        logger.LogWarning("OpenRouter plan deserialised to null (attempt {Attempt}). Raw: {Json}", attempt, json);
+                        if (attempt < maxAttempts) continue;
+                        return new PlanGeneratorResult(string.Empty, null,
+                            "Plan generation service returned an unexpected response.", IsServerError: true);
+                    }
+
+                    if (string.IsNullOrWhiteSpace(plan.Intent) || plan.Operations.Count == 0)
+                    {
+                        logger.LogWarning("OpenRouter returned incomplete plan (attempt {Attempt}). Raw: {Json}", attempt, json);
+                        if (attempt < maxAttempts) continue;
+                        return new PlanGeneratorResult(string.Empty, null, "Query not supported by this assistant.");
+                    }
+
+                    logger.LogInformation("OpenRouter ← plan ready | intent={Intent} | services={Services} | classifications={Classifications}",
+                        plan.Intent,
+                        string.Join(", ", plan.Operations.Select(o => o.Service)),
+                        string.Join(", ", plan.Output?.IncludeClassifications ?? []));
+
+                    return new PlanGeneratorResult(markdown, plan, null);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                logger.LogWarning("OpenRouter call timed out after 45s for query: {Query}", query);
                 return new PlanGeneratorResult(string.Empty, null,
-                    "AI provider returned an empty response — the model may be rate-limited. Try again or switch to Mock.", IsServerError: true);
+                    "Plan generation timed out — please try again.", IsServerError: true);
             }
-
-            var raw = completion.Value.Content[0].Text;
-            logger.LogInformation("OpenRouter ← raw response:\n{Raw}", raw);
-
-            var startIdx = raw.IndexOf('{');
-            var endIdx   = raw.LastIndexOf('}');
-            if (startIdx < 0 || endIdx <= startIdx)
+            catch (Exception ex)
             {
-                logger.LogError("OpenRouter response contained no JSON object. Raw: {Raw}", raw);
+                logger.LogError(ex, "OpenRouter call failed (attempt {Attempt}) for query: {Query}", attempt, query);
+                if (attempt < maxAttempts) continue;
                 return new PlanGeneratorResult(string.Empty, null,
-                    "Plan generation service returned an unreadable response.", IsServerError: true);
+                    "Plan generation service is temporarily unavailable.", IsServerError: true);
             }
-            var json = raw[startIdx..(endIdx + 1)];
-
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-
-            if (!root.GetProperty("supported").GetBoolean())
-            {
-                var reason = root.GetProperty("reason").GetString()
-                             ?? "Query not supported by this assistant.";
-                return new PlanGeneratorResult(string.Empty, null, reason);
-            }
-
-            var markdown = root.GetProperty("markdown").GetString() ?? string.Empty;
-            var plan = JsonSerializer.Deserialize<ExecutionPlan>(
-                root.GetProperty("plan").GetRawText(),
-                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-
-            if (plan is null)
-            {
-                logger.LogError("OpenRouter returned supported=true but plan deserialised to null. Raw: {Json}", json);
-                return new PlanGeneratorResult(string.Empty, null,
-                    "Plan generation service returned an unexpected response.", IsServerError: true);
-            }
-
-            if (string.IsNullOrWhiteSpace(plan.Intent) || plan.Operations.Count == 0)
-            {
-                logger.LogWarning("OpenRouter returned incomplete plan. Raw: {Json}", json);
-                return new PlanGeneratorResult(string.Empty, null, "Query not supported by this assistant.");
-            }
-
-            logger.LogInformation("OpenRouter ← plan ready | intent={Intent} | services={Services} | classifications={Classifications}",
-                plan.Intent,
-                string.Join(", ", plan.Operations.Select(o => o.Service)),
-                string.Join(", ", plan.Output?.IncludeClassifications ?? []));
-
-            return new PlanGeneratorResult(markdown, plan, null);
         }
-        catch (OperationCanceledException)
-        {
-            logger.LogWarning("OpenRouter call timed out after 45s for query: {Query}", query);
-            return new PlanGeneratorResult(string.Empty, null,
-                "Plan generation timed out — please try again.", IsServerError: true);
-        }
-        catch (JsonException ex)
-        {
-            logger.LogError(ex, "OpenRouter response failed JSON parse for query: {Query}", query);
-            return new PlanGeneratorResult(string.Empty, null,
-                "Plan generation service returned an unreadable response.", IsServerError: true);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "OpenRouter call failed for query: {Query}", query);
-            return new PlanGeneratorResult(string.Empty, null,
-                "Plan generation service is temporarily unavailable.", IsServerError: true);
-        }
+
+        return new PlanGeneratorResult(string.Empty, null,
+            "Plan generation service is temporarily unavailable.", IsServerError: true);
     }
 }
