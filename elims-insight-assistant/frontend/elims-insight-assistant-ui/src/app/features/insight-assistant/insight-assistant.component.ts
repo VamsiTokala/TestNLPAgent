@@ -73,7 +73,7 @@ export class InsightAssistantComponent implements OnInit {
     this.isLoading = true;
     this.slowWarning = false;
     if (this._slowTimer) clearTimeout(this._slowTimer);
-    this._slowTimer = setTimeout(() => { if (this.isLoading) this.slowWarning = true; }, 5000);
+    this._slowTimer = setTimeout(() => this.zone.run(() => { if (this.isLoading) this.slowWarning = true; }), 5000);
 
     this.api.query(this.form.value.query || '', this.selectedProvider ?? undefined)
       .pipe(timeout(55000))
@@ -132,7 +132,7 @@ export class InsightAssistantComponent implements OnInit {
           this.contracts = updated;
           this.addSuccess = true;
           this.addForm.reset({ isRequired: false });
-          setTimeout(() => { this.addSuccess = false; this.showAddForm = false; }, 1800);
+          setTimeout(() => this.zone.run(() => { this.addSuccess = false; this.showAddForm = false; }), 1800);
         });
       },
       error: (err) => { this.zone.run(() => { this.addError = err?.error ?? 'Failed to register contract.'; }); }
