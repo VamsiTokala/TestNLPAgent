@@ -271,9 +271,12 @@ User query: {{query}}
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
         try
         {
-            logger.LogInformation("Gemini → sending query: {Query}", query);
-            var response = await _model.GenerateContent(BuildPrompt(query), cancellationToken: cts.Token);
+            var prompt = BuildPrompt(query);
+            logger.LogInformation("Gemini → query: {Query}", query);
+            logger.LogInformation("Gemini → prompt:\n{Prompt}", prompt);
+            var response = await _model.GenerateContent(prompt, cancellationToken: cts.Token);
             var raw = response.Text ?? string.Empty;
+            logger.LogInformation("Gemini ← raw response:\n{Raw}", raw);
 
             // Extract the JSON object — robust against markdown fences or any leading/trailing text
             var startIdx = raw.IndexOf('{');
@@ -515,13 +518,16 @@ public class OpenRouterPlanGenerator(IConfiguration config, IServiceRegistry reg
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
         try
         {
-            logger.LogInformation("OpenRouter ({Model}) → sending query: {Query}", _model, query);
             var systemPrompt =
                 "You are a governed analytics plan generator for a laboratory information management system (LIMS).\n\n" +
                 PromptBuilder.CoreInstructions(registry.GetAll()) +
                 "\n\nRespond ONLY with a valid JSON object — no markdown fences, no trailing text.\n" +
                 "For a supported query set supported=true and populate plan.\n" +
                 "For an unsupported query set supported=false, set reason, and set markdown and plan to null.";
+
+            logger.LogInformation("OpenRouter ({Model}) → query: {Query}", _model, query);
+            logger.LogInformation("OpenRouter → system prompt:\n{Prompt}", systemPrompt);
+            logger.LogInformation("OpenRouter → user message: {Query}", query);
 
             var completion = await _client.CompleteChatAsync(
                 [new SystemChatMessage(systemPrompt), new UserChatMessage(query)],
@@ -536,6 +542,7 @@ public class OpenRouterPlanGenerator(IConfiguration config, IServiceRegistry reg
             }
 
             var raw = completion.Value.Content[0].Text;
+            logger.LogInformation("OpenRouter ← raw response:\n{Raw}", raw);
 
             var startIdx = raw.IndexOf('{');
             var endIdx   = raw.LastIndexOf('}');
