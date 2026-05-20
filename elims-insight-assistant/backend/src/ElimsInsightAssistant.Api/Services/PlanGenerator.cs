@@ -63,54 +63,56 @@ internal static class PromptBuilder
     {
         var servicesBlock = ServicesBlock(contracts);
         return $"""
-REGISTERED SERVICE CONTRACTS (select only those needed to answer the query):
+REGISTERED SERVICE CONTRACTS — these are the ONLY data sources available:
 {servicesBlock}
 
 ALLOWED FILTER OPERATORS: =, !=, >, >=, <, <=, in, between, is null, is not null
 ALLOWED AGGREGATE FUNCTIONS: max, min, count, sum, avg
 MAX ROWS LIMIT: 500
 
-CLASSIFICATION RULES:
-- "On Time": actualCompletionDate <= plannedCompletionDate (both dates present)
-- "Delayed": actualCompletionDate > plannedCompletionDate (both dates present)
-- "Indeterminate": plannedCompletionDate is null OR actualCompletionDate is null
+DOMAIN
+Answer any question that can be served by one or more of the registered contracts above:
+- Single-contract:  filter, count, list, aggregate rows from one contract
+- Multi-contract:   join two or more contracts on a shared field; include all
+                    contracts needed to answer the question
+- Timeliness:       classify records as On Time / Delayed / Indeterminate when
+                    the question asks about completion deadlines or lateness
 
-THIS SYSTEM answers questions about study completion timeliness. It can:
-- Classify studies as On Time, Delayed, or Indeterminate
-- Filter or show studies by any combination of those classifications
-- Count or summarise studies across classifications
+SUPPORTED = TRUE for any query that can be answered using the registered contracts.
+SUPPORTED = FALSE only when the query asks about something no registered contract
+covers (weather, invoices, HR records, unrelated equipment, recipes, etc.).
 
-Set supported=true if the user's question can reasonably be answered using
-study completion data — regardless of how it is phrased. You are an AI; use
-your understanding of intent, not keyword matching.
+CLASSIFICATION RULES (use ONLY when the query is about completion timeliness):
+- "On Time":        actualCompletionDate <= plannedCompletionDate (both present)
+- "Delayed":        actualCompletionDate >  plannedCompletionDate (both present)
+- "Indeterminate":  plannedCompletionDate is null OR actualCompletionDate is null
 
-Set supported=false only when the query is clearly outside this domain
-(e.g. weather, HR, invoices, lab equipment unrelated to study completion).
+BUILDING THE PLAN
+1. Identify which contracts provide the data needed. Include ALL contracts required
+   (both sides of any join).
+2. Set intent to a short snake_case verb-phrase that describes what the user wants
+   — derive it from the query, do NOT use a fixed template.
+3. For joins, populate correlate with leftEntity, rightEntity, leftField, rightField
+   identifying the shared key between the two contracts.
+4. Set output.includeClassifications:
+   - delayed / late / overdue / not-on-time / behind  → ["Delayed", "Indeterminate"]
+   - only delayed                                      → ["Delayed"]
+   - only indeterminate / missing data                 → ["Indeterminate"]
+   - on time / met deadline / finished early           → ["On Time"]
+   - all / count / overview / non-timeliness query     → ["On Time", "Delayed", "Indeterminate"]
+5. Fill "reason" on each operation explaining why that contract is needed.
 
-SET output.includeClassifications to the smallest set that fully answers the intent:
-- Intent is "problems / not on time / at risk / delayed" → ["Delayed", "Indeterminate"]
-- Intent is specifically and only "delayed studies" → ["Delayed"]
-- Intent is specifically and only "indeterminate / missing data" → ["Indeterminate"]
-- Intent is "successful / on time / met deadline" → ["On Time"]
-- Intent is a broad overview, count, all studies, or unclear → ["On Time", "Delayed", "Indeterminate"]
+OUTPUT
+If supported = true:
+  - reason   = null
+  - markdown = ONE short sentence summarising the plan (no bullets, no steps)
+  - plan     = fully populated (intent, entities, operations with reasons,
+               correlate if a join, output.includeClassifications, limits)
 
-FOR EACH SELECTED OPERATION, provide a brief "reason" explaining why that service
-is needed to answer this specific query.
-
-If the query IS about study completion timeliness or classification filtering:
-  - Set supported = true, reason = null
-  - Write a clear markdown plan explaining the steps
-  - Populate plan with version "1.0", intent "find_studies_not_completed_on_time",
-    the required service operations with reasons, output.includeClassifications,
-    and limits maxRows 500
-  - IMPORTANT: intent, entities, and operations MUST all be fully populated.
-    Never return blank intent or empty operations when supported=true.
-    If you cannot determine the full plan, set supported=false instead.
-
-If the query is NOT about study completion timeliness:
-  - Set supported = false
-  - Set reason to a one-sentence explanation
-  - Set markdown = null and plan = null
+If supported = false:
+  - reason   = one sentence explaining why this is outside the domain
+  - markdown = null
+  - plan     = null
 """;
     }
 }
@@ -126,82 +128,93 @@ public class MockPlanGenerator(IServiceRegistry registry, ILogger<MockPlanGenera
         var q = query.ToLowerInvariant();
         logger.LogInformation("Mock → query: {Query}", query);
 
-        var classifications = ResolveClassifications(q);
-        var contracts = registry.GetAll();
+        var allContracts = registry.GetAll();
 
-        var markdown = $"""
-# Analysis Plan
-Intent: Find studies not completed on time.
+        // Determine which contracts are relevant to the query
+        var selectedContracts = SelectContracts(q, allContracts);
+        var intent            = DeriveIntent(q);
+        var classifications   = ResolveClassifications(q);
 
-## Contract mapping
-{string.Join("\n", contracts.Select(c => $"- {c.DisplayName}: {c.Purpose}"))}
-
-## Steps
-1. Fetch studies from Study Service.
-2. Fetch completed TestPs from CoreLabs Service.
-3. Correlate Study and TestP records using studyId.
-4. Group TestPs by studyId.
-5. Derive actual study completion as the maximum TestP completedAt timestamp.
-6. Compare actual completion date with planned completion date.
-7. Classify each study as On Time, Delayed, or Indeterminate.
-8. Return {string.Join(" and ", classifications)} studies with supporting details.
-
-## Execution mode
-Read-only, deterministic, approved service contracts only.
-""";
+        // Build a short, query-derived markdown summary
+        var contractNames = string.Join(" + ", selectedContracts.Select(c => c.DisplayName));
+        var markdown = $"Fetching data from {contractNames} to answer: {query}.";
 
         var plan = new ExecutionPlan
         {
-            Intent = "find_studies_not_completed_on_time",
-            Entities = ["study", "testp"],
-            Operations = contracts.Select(c => new PlanOperation(
+            Intent   = intent,
+            Entities = selectedContracts.Select(c => c.Name.Split('-')[0]).Distinct().ToList(),
+            Operations = selectedContracts.Select(c => new PlanOperation(
                 Service: c.Name,
-                Action: c.Action,
-                Select: [.. c.Fields],
-                Filters: c.Name == "corelabs-service"
-                    ? [new("status", "=", "Completed")]
-                    : [],
-                Reason: c.Name == "study-service"
-                    ? "Required for study identity, planned completion dates, and legal entity filtering"
-                    : "Required for actual completion timestamps derived from TestP records"
+                Action:  c.Action,
+                Select:  [.. c.Fields],
+                Filters: [],
+                Reason:  $"Provides {c.Purpose.ToLowerInvariant()}"
             )).ToList(),
             Output = new PlanOutput(classifications)
         };
 
-        logger.LogInformation("Mock ← plan ready | classifications={Classifications} | services={Services}",
-            string.Join(", ", classifications),
-            string.Join(", ", contracts.Select(c => c.Name)));
+        logger.LogInformation(
+            "Mock ← plan ready | intent={Intent} | services={Services} | classifications={Classifications}",
+            intent,
+            string.Join(", ", selectedContracts.Select(c => c.Name)),
+            string.Join(", ", classifications));
 
         return Task.FromResult(new PlanGeneratorResult(markdown, plan, null));
     }
 
+    // Select which registered contracts are relevant based on keywords in the query.
+    // Falls back to ALL contracts so the Mock never silently drops data.
+    private static List<ServiceContractEntry> SelectContracts(
+        string q, IReadOnlyList<ServiceContractEntry> all)
+    {
+        var selected = all.Where(c =>
+        {
+            var name    = c.Name.ToLowerInvariant();
+            var display = c.DisplayName.ToLowerInvariant();
+            var words   = new[] { name, display }
+                .Concat(c.Fields.Select(f => f.ToLowerInvariant()))
+                .Concat(c.Purpose.ToLowerInvariant().Split(' '));
+            return words.Any(w => w.Length > 2 && q.Contains(w));
+        }).ToList();
+
+        // If nothing matched, include all required contracts plus the first optional one
+        // so the Mock always returns something useful
+        if (selected.Count == 0)
+            selected = all.Where(c => c.IsRequired).ToList();
+        if (selected.Count == 0)
+            selected = [all[0]];
+
+        return selected;
+    }
+
+    private static string DeriveIntent(string q)
+    {
+        // Map recognisable phrases to tidy intent slugs
+        if (q.Contains("not on time") || q.Contains("not completed on time") || q.Contains("late"))
+            return "find_records_not_completed_on_time";
+        if (q.Contains("delayed") || q.Contains("overdue") || q.Contains("past due"))
+            return "find_delayed_records";
+        if (q.Contains("indeterminate") || q.Contains("missing date") || q.Contains("no completion"))
+            return "find_indeterminate_records";
+        if (q.Contains("on time") || q.Contains("met deadline") || q.Contains("completed early"))
+            return "find_on_time_records";
+        if (q.Contains("count") || q.Contains("how many") || q.Contains("total"))
+            return "count_records";
+        if (q.Contains("list") || q.Contains("show") || q.Contains("find") || q.Contains("get"))
+            return "list_records";
+        if (q.Contains("summary") || q.Contains("overview") || q.Contains("breakdown"))
+            return "summarise_records";
+        return "query_records";
+    }
+
     private static List<string> ResolveClassifications(string q)
     {
-        // Exact classification filter
-        if (q.Contains("classification indeterminate")) return ["Indeterminate"];
-        if (q.Contains("classification delayed"))       return ["Delayed"];
-        if (q.Contains("classification on time"))       return ["On Time"];
-
-        // Overview / all-studies queries
-        bool isOverview = q.Contains("all studies") || q.Contains("show all") ||
-                          q.Contains("list studies") || q.Contains("find studies") ||
-                          q.Contains("how many") || q.Contains("study count") ||
-                          q.Contains("total studies") || q.Contains("study status") ||
-                          q.Contains("study summary") || q.Contains("breakdown") ||
-                          q.Contains("overview") || q.Contains("dashboard") ||
-                          q.Contains("which studies");
-        if (isOverview) return ["On Time", "Delayed", "Indeterminate"];
-
-        // "not on time" negation — must check before plain "on time"
         bool notOnTime = q.Contains("not on time") || q.Contains("not completed on time") ||
                          q.Contains("haven't finished") || q.Contains("not finished");
 
-        bool wantsDelayed = q.Contains("delayed") || q.Contains("overdue") ||
-                            q.Contains("late") || q.Contains("past due") ||
-                            q.Contains("behind") || q.Contains("at risk") ||
-                            q.Contains("missed deadline") || q.Contains("exceeded deadline") ||
-                            q.Contains("need attention") || q.Contains("problematic") ||
-                            q.Contains("still open") || notOnTime;
+        bool wantsDelayed = q.Contains("delayed") || q.Contains("overdue") || q.Contains("late") ||
+                            q.Contains("past due") || q.Contains("behind") || q.Contains("at risk") ||
+                            q.Contains("missed deadline") || notOnTime;
 
         bool wantsIndeterminate = q.Contains("indeterminate") || q.Contains("missing date") ||
                                   q.Contains("no completion date") || q.Contains("without date") ||
@@ -213,12 +226,20 @@ Read-only, deterministic, approved service contracts only.
                             q.Contains("completed early") || q.Contains("within deadline"))
                            && !notOnTime;
 
+        bool isOverview = q.Contains("all ") || q.Contains("show all") || q.Contains("how many") ||
+                          q.Contains("count") || q.Contains("summary") || q.Contains("breakdown") ||
+                          q.Contains("overview") || q.Contains("dashboard") || q.Contains("total") ||
+                          q.Contains("list ") || q.Contains("find ");
+
+        if (isOverview && !wantsDelayed && !wantsIndeterminate && !wantsOnTime)
+            return ["On Time", "Delayed", "Indeterminate"];
+
         var result = new List<string>(3);
         if (wantsOnTime)        result.Add("On Time");
         if (wantsDelayed)       result.Add("Delayed");
         if (wantsIndeterminate) result.Add("Indeterminate");
 
-        return result.Count > 0 ? result : ["Delayed", "Indeterminate"];
+        return result.Count > 0 ? result : ["On Time", "Delayed", "Indeterminate"];
     }
 }
 
@@ -257,11 +278,11 @@ For an unsupported query set supported=false, set reason, and set markdown and p
 {
   "supported": true,
   "reason": null,
-  "markdown": "string — markdown explanation of the plan steps",
+  "markdown": "ONE short sentence describing the plan",
   "plan": {
     "version": "1.0",
-    "intent": "find_studies_not_completed_on_time",
-    "entities": ["study","testp"],
+    "intent": "<snake_case_verb_phrase_derived_from_the_query>",
+    "entities": ["<entity1>", "<entity2_if_join>"],
     "operations": [
 {{exampleOps}}
     ],

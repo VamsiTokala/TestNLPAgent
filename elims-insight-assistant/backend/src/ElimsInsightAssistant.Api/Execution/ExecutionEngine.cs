@@ -1,77 +1,123 @@
+using System.Reflection;
 using ElimsInsightAssistant.Api.Models;
 using ElimsInsightAssistant.Api.Services;
 
 namespace ElimsInsightAssistant.Api.Execution;
 
+public record ExecutionOutput(
+    QuerySummary Summary,
+    List<StudyCompletionResult> Rows,
+    Dictionary<string, List<Dictionary<string, object?>>> Datasets,
+    List<string> ServicesCalled);
+
 public interface IExecutionEngine
 {
-    Task<(QuerySummary summary, List<StudyCompletionResult> rows, List<string> servicesCalled)> ExecuteAsync(ExecutionPlan plan, UserContext userContext);
+    Task<ExecutionOutput> ExecuteAsync(ExecutionPlan plan, UserContext userContext);
 }
 
-public class ExecutionEngine(IStudyServiceClient studyClient, ICoreLabsServiceClient coreLabsClient, IClassificationService classificationService) : IExecutionEngine
+public class ExecutionEngine : IExecutionEngine
 {
-    public async Task<(QuerySummary summary, List<StudyCompletionResult> rows, List<string> servicesCalled)> ExecuteAsync(ExecutionPlan plan, UserContext userContext)
+    private readonly Dictionary<string, Func<Task<IEnumerable<object>>>> _dataSources;
+    private readonly IClassificationService _classifier;
+
+    public ExecutionEngine(
+        IStudyServiceClient studyClient,
+        ICoreLabsServiceClient coreLabsClient,
+        IProtocolServiceClient protocolClient,
+        ISampleServiceClient sampleClient,
+        IClassificationService classifier)
+    {
+        _dataSources = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["study-service"]    = async () => (await studyClient.ListStudiesAsync()).Cast<object>(),
+            ["corelabs-service"] = async () => (await coreLabsClient.ListTestPsAsync()).Cast<object>(),
+            ["protocol-service"] = async () => (await protocolClient.ListProtocolsAsync()).Cast<object>(),
+            ["sample-service"]   = async () => (await sampleClient.ListSamplesAsync()).Cast<object>()
+        };
+        _classifier = classifier;
+    }
+
+    public async Task<ExecutionOutput> ExecuteAsync(ExecutionPlan plan, UserContext userContext)
     {
         if (!userContext.Roles.Contains("StudyViewer") || !userContext.Roles.Contains("CoreLabsViewer"))
             throw new UnauthorizedAccessException("User lacks required roles.");
 
-        // ── Fetch studies — apply filters from the plan operation ─────────────
-        var studyOp = plan.Operations.FirstOrDefault(o => o.Service == "study-service");
-        var studies = (await studyClient.ListStudiesAsync())
-            .Where(s => userContext.LegalEntities.Contains(s.LegalEntity))
-            .Where(s => PassesFilters(s, studyOp?.Filters ?? []))
-            .ToList();
-
-        // ── Fetch TestPs — apply filters from the plan operation ──────────────
-        var testpOp = plan.Operations.FirstOrDefault(o => o.Service == "corelabs-service");
-        var testPs = (await coreLabsClient.ListTestPsAsync())
-            .Where(t => PassesFilters(t, testpOp?.Filters ?? []))
-            .ToList();
-
-        // ── Correlate using fields from plan.Correlate ────────────────────────
-        var rightField = plan.Correlate.RightField;   // e.g. "studyId"
-
-        // ── Aggregate using plan.Transform.Aggregates ─────────────────────────
-        // Each aggregate: { field, fn, as } — derive a DateTime? per group key
-        var aggregate = plan.Transform.Aggregates.FirstOrDefault()
-                        ?? new PlanAggregate("completedAt", "max", "actualCompletionDate");
-
-        var completionByStudy = testPs
-            .GroupBy(t => GetStringField(t, rightField))
-            .Where(g => g.Key != null)
-            .ToDictionary(
-                g => g.Key!,
-                g => ApplyDateAggregate(g, aggregate.Field, aggregate.Fn));
-
-        // ── Classify each study ───────────────────────────────────────────────
-        var allResults = studies.Select(study =>
+        // ── Fetch & filter every contract referenced in the plan ──────────────
+        var rawByService = new Dictionary<string, List<object>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var op in plan.Operations)
         {
-            completionByStudy.TryGetValue(study.StudyId, out var actual);
-            return classificationService.Classify(study, actual);
-        }).ToList();
+            if (!_dataSources.TryGetValue(op.Service, out var fetch)) continue;
+            var data = (await fetch()).Where(r => PassesFilters(r, op.Filters)).ToList();
+            rawByService[op.Service] = data;
+        }
 
-        var summary = new QuerySummary(
-            allResults.Count(r => r.Classification == "On Time"),
-            allResults.Count(r => r.Classification == "Delayed"),
-            allResults.Count(r => r.Classification == "Indeterminate"));
+        // ── Apply legal-entity authorization to studies ───────────────────────
+        if (rawByService.TryGetValue("study-service", out var studyObjs))
+        {
+            rawByService["study-service"] = studyObjs
+                .Cast<StudyDto>()
+                .Where(s => userContext.LegalEntities.Contains(s.LegalEntity))
+                .Cast<object>()
+                .ToList();
+        }
 
-        var filtered = allResults
-            .Where(r => plan.Output.IncludeClassifications.Contains(r.Classification))
-            .Take(plan.Limits.MaxRows)
-            .ToList();
+        // ── Project raw data into dictionaries for the response ───────────────
+        var datasets = rawByService.ToDictionary(
+            kvp => kvp.Key,
+            kvp => kvp.Value.Select(ToDict).ToList());
 
-        var servicesCalled = plan.Operations.Select(o => o.Service).ToList();
-        return (summary, filtered, servicesCalled);
+        // ── If this is a timeliness query (studies + testps both present and
+        //    classifications requested), run the classification flow ─────────
+        var rows = new List<StudyCompletionResult>();
+        var summary = new QuerySummary();
+
+        var wantsClassification = plan.Output.IncludeClassifications.Count > 0;
+        if (wantsClassification &&
+            rawByService.TryGetValue("study-service", out var sObjs) &&
+            rawByService.TryGetValue("corelabs-service", out var tObjs))
+        {
+            var studies = sObjs.Cast<StudyDto>().ToList();
+            var testps  = tObjs.Cast<TestPDto>().ToList();
+
+            var rightField = plan.Correlate?.RightField ?? "studyId";
+            var aggregate  = plan.Transform?.Aggregates?.FirstOrDefault()
+                             ?? new PlanAggregate("completedAt", "max", "actualCompletionDate");
+
+            var completionByStudy = testps
+                .GroupBy(t => GetStringField(t, rightField))
+                .Where(g => g.Key != null)
+                .ToDictionary(
+                    g => g.Key!,
+                    g => ApplyDateAggregate(g.Cast<object>(), aggregate.Field, aggregate.Fn));
+
+            var allClassified = studies.Select(s =>
+            {
+                completionByStudy.TryGetValue(s.StudyId, out var actual);
+                return _classifier.Classify(s, actual);
+            }).ToList();
+
+            summary = new QuerySummary(
+                allClassified.Count(r => r.Classification == "On Time"),
+                allClassified.Count(r => r.Classification == "Delayed"),
+                allClassified.Count(r => r.Classification == "Indeterminate"));
+
+            rows = allClassified
+                .Where(r => plan.Output.IncludeClassifications.Contains(r.Classification))
+                .Take(plan.Limits.MaxRows)
+                .ToList();
+        }
+
+        var servicesCalled = plan.Operations.Select(o => o.Service).Distinct().ToList();
+        return new ExecutionOutput(summary, rows, datasets, servicesCalled);
     }
 
-    // ── Filter evaluation ─────────────────────────────────────────────────────
+    // ── Filters ───────────────────────────────────────────────────────────────
 
     private static bool PassesFilters(object record, List<PlanFilter> filters)
     {
         foreach (var f in filters)
         {
-            var fieldVal = GetStringField(record, f.Field);
-            if (!EvaluateFilter(fieldVal, f.Op, f.Value))
+            if (!EvaluateFilter(GetStringField(record, f.Field), f.Op, f.Value))
                 return false;
         }
         return true;
@@ -80,44 +126,42 @@ public class ExecutionEngine(IStudyServiceClient studyClient, ICoreLabsServiceCl
     private static bool EvaluateFilter(string? fieldVal, string op, string? filterVal) =>
         op.ToLowerInvariant() switch
         {
-            "="  => string.Equals(fieldVal, filterVal, StringComparison.OrdinalIgnoreCase),
-            "!=" => !string.Equals(fieldVal, filterVal, StringComparison.OrdinalIgnoreCase),
+            "="           => string.Equals(fieldVal, filterVal, StringComparison.OrdinalIgnoreCase),
+            "!="          => !string.Equals(fieldVal, filterVal, StringComparison.OrdinalIgnoreCase),
             "is null"     => fieldVal is null or "",
             "is not null" => fieldVal is not null and not "",
-            _ => true   // unsupported ops pass through — validator already checked them
+            _             => true
         };
 
-    // ── Field accessors via reflection ────────────────────────────────────────
+    // ── Reflection helpers ────────────────────────────────────────────────────
 
-    private static string? GetStringField(object obj, string field)
+    private static readonly BindingFlags PropFlags =
+        BindingFlags.IgnoreCase | BindingFlags.Public | BindingFlags.Instance;
+
+    private static string? GetStringField(object obj, string field) =>
+        obj.GetType().GetProperty(field, PropFlags)?.GetValue(obj)?.ToString();
+
+    private static Dictionary<string, object?> ToDict(object obj)
     {
-        var prop = obj.GetType().GetProperty(
-            field, System.Reflection.BindingFlags.IgnoreCase |
-                   System.Reflection.BindingFlags.Public |
-                   System.Reflection.BindingFlags.Instance);
-        return prop?.GetValue(obj)?.ToString();
+        var dict = new Dictionary<string, object?>();
+        foreach (var p in obj.GetType().GetProperties(PropFlags))
+        {
+            var name = char.ToLowerInvariant(p.Name[0]) + p.Name[1..];
+            dict[name] = p.GetValue(obj);
+        }
+        return dict;
     }
-
-    // ── Date aggregation ──────────────────────────────────────────────────────
 
     private static DateTime? ApplyDateAggregate(IEnumerable<object> records, string field, string fn)
     {
         var dates = records
-            .Select(r =>
-            {
-                var prop = r.GetType().GetProperty(
-                    field, System.Reflection.BindingFlags.IgnoreCase |
-                           System.Reflection.BindingFlags.Public |
-                           System.Reflection.BindingFlags.Instance);
-                var val = prop?.GetValue(r);
-                return val is DateTime dt ? dt : (DateTime?)null;
-            })
+            .Select(r => r.GetType().GetProperty(field, PropFlags)?.GetValue(r))
+            .Select(v => v is DateTime dt ? dt : (DateTime?)null)
             .Where(d => d.HasValue)
             .Select(d => d!.Value)
             .ToList();
 
         if (dates.Count == 0) return null;
-
         return fn.ToLowerInvariant() switch
         {
             "min" => dates.Min(),

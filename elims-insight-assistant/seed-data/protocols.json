@@ -1,0 +1,15 @@
+[
+  {"protocolId":"P1",  "studyId":"S1",  "version":"v1.0", "status":"Approved",   "approvedAt":"2026-01-10T00:00:00Z", "expiresAt":"2027-01-10T00:00:00Z"},
+  {"protocolId":"P2",  "studyId":"S1",  "version":"v1.1", "status":"Approved",   "approvedAt":"2026-02-15T00:00:00Z", "expiresAt":"2027-02-15T00:00:00Z"},
+  {"protocolId":"P3",  "studyId":"S2",  "version":"v1.0", "status":"Approved",   "approvedAt":"2026-01-12T00:00:00Z", "expiresAt":"2026-04-12T00:00:00Z"},
+  {"protocolId":"P4",  "studyId":"S3",  "version":"v2.0", "status":"Approved",   "approvedAt":"2026-01-20T00:00:00Z", "expiresAt":"2027-01-20T00:00:00Z"},
+  {"protocolId":"P5",  "studyId":"S4",  "version":"v1.0", "status":"Draft",      "approvedAt":null,                   "expiresAt":null},
+  {"protocolId":"P6",  "studyId":"S5",  "version":"v1.0", "status":"Approved",   "approvedAt":"2026-01-05T00:00:00Z", "expiresAt":"2026-12-31T00:00:00Z"},
+  {"protocolId":"P7",  "studyId":"S6",  "version":"v1.0", "status":"Approved",   "approvedAt":"2026-01-08T00:00:00Z", "expiresAt":"2026-07-08T00:00:00Z"},
+  {"protocolId":"P8",  "studyId":"S7",  "version":"v1.0", "status":"Expired",    "approvedAt":"2025-04-01T00:00:00Z", "expiresAt":"2026-04-01T00:00:00Z"},
+  {"protocolId":"P9",  "studyId":"S8",  "version":"v1.2", "status":"Approved",   "approvedAt":"2026-02-01T00:00:00Z", "expiresAt":"2027-02-01T00:00:00Z"},
+  {"protocolId":"P10", "studyId":"S9",  "version":"v1.0", "status":"Approved",   "approvedAt":"2026-02-10T00:00:00Z", "expiresAt":"2027-02-10T00:00:00Z"},
+  {"protocolId":"P11", "studyId":"S10", "version":"v1.0", "status":"Approved",   "approvedAt":"2026-01-25T00:00:00Z", "expiresAt":"2027-01-25T00:00:00Z"},
+  {"protocolId":"P12", "studyId":"S11", "version":"v1.0", "status":"Approved",   "approvedAt":"2026-01-15T00:00:00Z", "expiresAt":"2026-06-15T00:00:00Z"},
+  {"protocolId":"P13", "studyId":"S12", "version":"v1.0", "status":"Draft",      "approvedAt":null,                   "expiresAt":null}
+]
