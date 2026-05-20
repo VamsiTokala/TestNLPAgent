@@ -119,39 +119,12 @@ If the query is NOT about study completion timeliness:
 
 public class MockPlanGenerator(IServiceRegistry registry, ILogger<MockPlanGenerator> logger) : IPlanGenerator
 {
-    public string ProviderName => "Mock (keyword matching)";
-
-    private static readonly string[] SupportedTerms =
-    [
-        // delayed / problem
-        "not completed on time", "not on time", "delayed", "overdue", "late",
-        "past due", "behind schedule", "running late", "missed deadline",
-        "exceeded deadline", "at risk", "need attention", "haven't finished",
-        "not finished", "still open", "problematic",
-        // indeterminate / missing
-        "indeterminate", "missing date", "no completion date", "without date",
-        "incomplete data", "unknown status", "no planned date",
-        // on time / successful
-        "on time", "completed on time", "met deadline", "ahead of schedule",
-        "finished early", "completed early", "within deadline",
-        // all / overview
-        "show studies", "list studies", "all studies", "find studies",
-        "show all", "how many", "study count", "total studies", "study status",
-        "study summary", "breakdown", "overview", "dashboard", "which studies",
-        "classification"
-    ];
+    public string ProviderName => "Mock";
 
     public Task<PlanGeneratorResult> GenerateAsync(string query)
     {
         var q = query.ToLowerInvariant();
-        logger.LogInformation("Mock → evaluating query: {Query}", query);
-        if (!SupportedTerms.Any(q.Contains))
-        {
-            logger.LogInformation("Mock ← no keyword match — unsupported");
-            return Task.FromResult(new PlanGeneratorResult(
-                string.Empty, null,
-                "This demo currently supports queries related to study completion timeliness."));
-        }
+        logger.LogInformation("Mock → query: {Query}", query);
 
         var classifications = ResolveClassifications(q);
         var contracts = registry.GetAll();
