@@ -22,7 +22,7 @@ internal sealed class FlexibleStringListConverter : JsonConverter<List<string>>
                 while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
                     list.Add(reader.TokenType == JsonTokenType.String
                         ? reader.GetString() ?? string.Empty
-                        : reader.GetRawText());
+                        : JsonSerializer.Deserialize<JsonElement>(ref reader).GetRawText());
                 return list;
             default:
                 reader.Skip();
