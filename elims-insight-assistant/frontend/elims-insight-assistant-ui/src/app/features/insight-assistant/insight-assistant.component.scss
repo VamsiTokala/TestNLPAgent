@@ -344,6 +344,43 @@ $slate-900: #0f172a;
 
 .empty-state { text-align: center; padding: 2rem; color: $slate-400; font-size: .88rem; }
 
+// ── Generic dataset tables ────────────────────────────────────────────────────
+.dataset-card {
+  background: #fff;
+  border: 1px solid $slate-200;
+  border-radius: 12px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+  box-shadow: 0 1px 3px rgba(0,0,0,.05);
+  animation: slideUp .35s ease;
+}
+.dataset-card > summary {
+  cursor: pointer; user-select: none; list-style: none;
+  &::-webkit-details-marker { display: none; }
+  &::before { content: '▸'; margin-right: .5rem; color: $slate-400; transition: transform .15s; display: inline-block; }
+}
+.dataset-card[open] > summary::before { transform: rotate(90deg); }
+
+.dataset-header {
+  display: flex; align-items: center; gap: .5rem; margin-bottom: 0;
+  h4 {
+    margin: 0; font-size: .85rem; font-weight: 700; color: $slate-900;
+    font-family: monospace; display: inline;
+  }
+}
+.dataset-card[open] .dataset-header { margin-bottom: .75rem; }
+.dataset-scroll {
+  overflow-x: auto;
+  max-height: 360px; overflow-y: auto;
+  border: 1px solid $slate-100; border-radius: 6px;
+  table { font-size: .78rem; }
+  th {
+    position: sticky; top: 0; background: #fff;
+    font-family: monospace; text-transform: none; letter-spacing: 0;
+  }
+  td { font-family: monospace; white-space: nowrap; }
+}
+
 // ── JSON plan ─────────────────────────────────────────────────────────────────
 .json-card {
   background: #fff; border: 1px solid $slate-200; border-radius: 10px;

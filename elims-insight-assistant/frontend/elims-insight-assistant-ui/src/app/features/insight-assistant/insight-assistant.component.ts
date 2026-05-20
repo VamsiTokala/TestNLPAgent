@@ -47,6 +47,27 @@ export class InsightAssistantComponent implements OnInit {
     return new Set(this.response?.jsonPlan?.operations?.map(op => op.service) ?? []).size;
   }
 
+  get datasetEntries(): Array<{ service: string; rows: Array<{ [field: string]: unknown }> }> {
+    const datasets = this.response?.datasets ?? {};
+    return Object.keys(datasets)
+      .filter(k => datasets[k]?.length > 0)
+      .map(service => ({ service, rows: datasets[service] }));
+  }
+
+  datasetColumns(rows: Array<{ [field: string]: unknown }>): string[] {
+    return rows.length > 0 ? Object.keys(rows[0]) : [];
+  }
+
+  formatCell(value: unknown): string {
+    if (value === null || value === undefined) return '—';
+    if (value instanceof Date) return value.toISOString();
+    if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(value)) {
+      const d = new Date(value);
+      return isNaN(d.getTime()) ? value : d.toISOString().slice(0, 10);
+    }
+    return String(value);
+  }
+
   constructor(private fb: FormBuilder, private api: InsightAssistantApiService, private zone: NgZone) {
     this.form = this.fb.group({ query: ['Find studies not completed on time'] });
     this.addForm = this.fb.group({

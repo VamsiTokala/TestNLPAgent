@@ -213,6 +213,28 @@
         </ng-template>
       </div>
 
+      <!-- Datasets (raw rows per service contract) -->
+      <details class="dataset-card" *ngFor="let d of datasetEntries" [open]="response.results.length === 0">
+        <summary class="dataset-header">
+          <h4>{{ d.service }}</h4>
+          <span class="count-badge">{{ d.rows.length }} row{{ d.rows.length !== 1 ? 's' : '' }}</span>
+        </summary>
+        <div class="dataset-scroll">
+          <table class="results-table">
+            <thead>
+              <tr>
+                <th *ngFor="let col of datasetColumns(d.rows)">{{ col }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let row of d.rows">
+                <td *ngFor="let col of datasetColumns(d.rows)">{{ formatCell(row[col]) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </details>
+
       <!-- JSON plan (collapsed) -->
       <details class="json-card">
         <summary>JSON Execution Plan</summary>

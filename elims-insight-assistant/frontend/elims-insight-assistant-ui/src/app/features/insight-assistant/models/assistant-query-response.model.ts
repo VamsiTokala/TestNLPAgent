@@ -28,5 +28,6 @@ export interface AssistantQueryResponse {
   validation: ValidationResult;
   summary: QuerySummary;
   results: StudyCompletionResult[];
+  datasets: { [serviceName: string]: Array<{ [field: string]: unknown }> };
   message: string;
 }
