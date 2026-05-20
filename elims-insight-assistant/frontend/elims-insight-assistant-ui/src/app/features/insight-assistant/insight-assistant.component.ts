@@ -1,6 +1,6 @@
 import { Component, NgZone, OnInit } from '@angular/core';
 import { FormBuilder, FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
-import { NgFor, NgIf, JsonPipe, DatePipe } from '@angular/common';
+import { NgFor, NgIf, JsonPipe } from '@angular/common';
 import { timeout, TimeoutError } from 'rxjs';
 import { InsightAssistantApiService, ProviderInfo } from './services/insight-assistant-api.service';
 import { AssistantQueryResponse } from './models/assistant-query-response.model';
@@ -11,7 +11,7 @@ import { ServiceContractEntry } from './models/service-contract.model';
   selector: 'app-insight-assistant',
   templateUrl: './insight-assistant.component.html',
   styleUrls: ['./insight-assistant.component.scss'],
-  imports: [ReactiveFormsModule, NgFor, NgIf, JsonPipe, DatePipe]
+  imports: [ReactiveFormsModule, NgFor, NgIf, JsonPipe]
 })
 export class InsightAssistantComponent implements OnInit {
   examples = [
@@ -59,6 +59,36 @@ export class InsightAssistantComponent implements OnInit {
     return rows.length > 0 ? Object.keys(rows[0]) : [];
   }
 
+  // Columns to render in the main Results grid. Derived from the first row so
+  // they reflect the primary entity the query targeted. We hide a few
+  // metadata-only fields that don't make sense in a table.
+  private static readonly HIDDEN_RESULT_COLS = new Set(['dataQualityFlags']);
+  resultsColumns(): string[] {
+    const rows = (this.response?.results ?? []) as Array<Record<string, unknown>>;
+    if (rows.length === 0) return [];
+    return Object.keys(rows[0]).filter(c => !InsightAssistantComponent.HIDDEN_RESULT_COLS.has(c));
+  }
+
+  prettyHeader(col: string): string {
+    // camelCase / snake_case → "Title Case"
+    return col
+      .replace(/[_-]+/g, ' ')
+      .replace(/([a-z])([A-Z])/g, '$1 $2')
+      .replace(/\b\w/g, c => c.toUpperCase());
+  }
+
+  isClassificationColumn(col: string): boolean { return col === 'classification'; }
+  isDateColumn(col: string): boolean {
+    return /date|at$/i.test(col);
+  }
+
+  // True only for timeliness queries — i.e. when the engine produced a
+  // `classification` column. Used to hide the On Time / Delayed / Indeterminate
+  // summary cards for plain count / list / filter queries.
+  hasClassifications(): boolean {
+    return this.resultsColumns().some(c => this.isClassificationColumn(c));
+  }
+
   formatCell(value: unknown): string {
     if (value === null || value === undefined) return '—';
     if (value instanceof Date) return value.toISOString();
@@ -66,6 +96,7 @@ export class InsightAssistantComponent implements OnInit {
       const d = new Date(value);
       return isNaN(d.getTime()) ? value : d.toISOString().slice(0, 10);
     }
+    if (Array.isArray(value)) return value.join(', ');
     return String(value);
   }
 

@@ -9,7 +9,7 @@ namespace ElimsInsightAssistant.Api.Execution;
 
 public record ExecutionOutput(
     QuerySummary Summary,
-    List<StudyCompletionResult> Rows,
+    List<Dictionary<string, object?>> Rows,
     Dictionary<string, List<Dictionary<string, object?>>> Datasets,
     List<string> ServicesCalled);
 
@@ -69,12 +69,17 @@ public class ExecutionEngine : IExecutionEngine
             kvp => kvp.Key,
             kvp => kvp.Value.Select(ToDict).ToList());
 
-        // ── If this is a timeliness query, detect left/right services by field
-        //    presence and run a generic classification flow ────────────────────
-        var rows = new List<StudyCompletionResult>();
+        // ── Build the Results list. Two modes:
+        //    • Classification mode (timeliness query): rows are dicts of the
+        //      primaryEntity record fields + classification metadata.
+        //    • Plain mode: rows are dicts of the primaryEntity (or first
+        //      fetched service) so the UI table reflects whatever the query
+        //      actually targets — no hard-coded shape.
+        var rows = new List<Dictionary<string, object?>>();
         var summary = new QuerySummary();
 
         var wantsClassification = plan.Output.IncludeClassifications.Count > 0;
+        var classificationProduced = false;
         if (wantsClassification)
         {
             var aggregate = plan.Transform.Aggregates.FirstOrDefault()
@@ -87,6 +92,7 @@ public class ExecutionEngine : IExecutionEngine
 
             if (leftService != null && rightService != null)
             {
+                classificationProduced = true;
                 var leftRows  = rawByService[leftService];
                 var rightRows = rawByService[rightService];
 
@@ -98,22 +104,111 @@ public class ExecutionEngine : IExecutionEngine
                     .Where(g => g.Key != null)
                     .ToDictionary(g => g.Key!, g => ApplyDateAggregate(g.Cast<object>(), aggregate.Field, aggregate.Fn));
 
-                var allClassified = leftRows.Select(s =>
+                // Decide which entity the classification is *attributed to*.
+                // Default = the side that owns plannedCompletionDate (leftService).
+                // If the plan declares a primaryEntity that matches another fetched
+                // contract, attribute classification to those rows instead and look
+                // up the parent's planned date via the join key.
+                var primaryService = !string.IsNullOrWhiteSpace(plan.PrimaryEntity)
+                                     && rawByService.ContainsKey(plan.PrimaryEntity)
+                    ? plan.PrimaryEntity
+                    : leftService;
+
+                List<Dictionary<string, object?>> allClassified;
+                if (string.Equals(primaryService, leftService, StringComparison.OrdinalIgnoreCase))
                 {
-                    var key = GetStringField(s, leftIdField);
-                    completionByKey.TryGetValue(key ?? "", out var actual);
-                    return ClassifyRecord(s, actual, leftIdField);
-                }).ToList();
+                    allClassified = leftRows.Select(s =>
+                    {
+                        var key = GetStringField(s, leftIdField);
+                        completionByKey.TryGetValue(key ?? "", out var actual);
+                        return ClassifyRecord(s, parent: s, actual);
+                    }).ToList();
+                }
+                else
+                {
+                    var parentByKey = leftRows
+                        .GroupBy(r => GetStringField(r, leftIdField))
+                        .Where(g => g.Key != null)
+                        .ToDictionary(g => g.Key!, g => g.First());
+
+                    var primaryRows = rawByService[primaryService];
+
+                    allClassified = primaryRows.Select(p =>
+                    {
+                        var parentKey = GetStringField(p, leftIdField);
+                        completionByKey.TryGetValue(parentKey ?? "", out var actual);
+                        parentByKey.TryGetValue(parentKey ?? "", out var parent);
+                        return ClassifyRecord(p, parent, actual);
+                    }).ToList();
+                }
 
                 summary = new QuerySummary(
-                    allClassified.Count(r => r.Classification == "On Time"),
-                    allClassified.Count(r => r.Classification == "Delayed"),
-                    allClassified.Count(r => r.Classification == "Indeterminate"));
+                    allClassified.Count(r => Equals(r.GetValueOrDefault("classification"), "On Time")),
+                    allClassified.Count(r => Equals(r.GetValueOrDefault("classification"), "Delayed")),
+                    allClassified.Count(r => Equals(r.GetValueOrDefault("classification"), "Indeterminate")));
 
                 rows = allClassified
-                    .Where(r => plan.Output.IncludeClassifications.Contains(r.Classification))
+                    .Where(r => plan.Output.IncludeClassifications.Contains(
+                        r.GetValueOrDefault("classification")?.ToString() ?? ""))
                     .Take(plan.Limits.MaxRows)
                     .ToList();
+            }
+        }
+
+        // Fallback: classification was not requested, or was requested but
+        // couldn't run (missing join side). Either way, populate Results with
+        // the primary entity's rows so the UI grid reflects what was queried.
+        // We also honour the correlate as an inner-join: when other services
+        // were fetched (and filtered), the primary entity is restricted to
+        // rows whose join key appears in EVERY other fetched service's results.
+        // That way a planner that filters one side (e.g. study-service by
+        // studyCode = ST-006) automatically restricts the primary entity too.
+        if (!classificationProduced)
+        {
+            var primaryService = !string.IsNullOrWhiteSpace(plan.PrimaryEntity)
+                                 && rawByService.ContainsKey(plan.PrimaryEntity)
+                ? plan.PrimaryEntity
+                : rawByService.Keys.FirstOrDefault();
+
+            if (primaryService != null && rawByService.TryGetValue(primaryService, out var primaryRows))
+            {
+                var joinField = !string.IsNullOrEmpty(plan.Correlate.LeftField)  ? plan.Correlate.LeftField
+                               : !string.IsNullOrEmpty(plan.Correlate.RightField) ? plan.Correlate.RightField
+                               : "studyId";
+
+                var primaryHasJoinField = primaryRows.Count > 0
+                    && primaryRows[0].GetType().GetProperty(joinField, PropFlags) is not null;
+
+                HashSet<string>? allowedKeys = null;
+                if (primaryHasJoinField)
+                {
+                    foreach (var kvp in rawByService)
+                    {
+                        if (string.Equals(kvp.Key, primaryService, StringComparison.OrdinalIgnoreCase)) continue;
+                        if (kvp.Value.Count == 0) continue;
+                        if (kvp.Value[0].GetType().GetProperty(joinField, PropFlags) is null) continue;
+
+                        var keys = kvp.Value
+                            .Select(o => GetStringField(o, joinField))
+                            .Where(s => s is not null)!
+                            .Cast<string>();
+
+                        allowedKeys = allowedKeys is null
+                            ? new HashSet<string>(keys, StringComparer.OrdinalIgnoreCase)
+                            : new HashSet<string>(
+                                allowedKeys.Intersect(keys, StringComparer.OrdinalIgnoreCase),
+                                StringComparer.OrdinalIgnoreCase);
+                    }
+                }
+
+                IEnumerable<object> filtered = primaryRows;
+                if (allowedKeys is not null)
+                {
+                    filtered = primaryRows.Where(p =>
+                        allowedKeys.Contains(GetStringField(p, joinField) ?? ""));
+                }
+
+                rows = filtered.Take(plan.Limits.MaxRows).Select(ToDict).ToList();
             }
         }
 
@@ -123,12 +218,14 @@ public class ExecutionEngine : IExecutionEngine
 
     // ── Generic classification using reflection ───────────────────────────────
 
-    internal static StudyCompletionResult ClassifyRecord(object left, DateTime? actual, string idField)
+    // Builds a generic row for a record + its (possibly different) timeliness parent.
+    // The dict starts with the record's own fields (preserving declaration order)
+    // and appends classification metadata on top. The UI renders columns from the
+    // dict keys so nothing in the schema is hard-coded.
+    internal static Dictionary<string, object?> ClassifyRecord(object presentation, object? parent, DateTime? actual)
     {
-        var id       = GetStringField(left, idField) ?? GetStringField(left, "id") ?? "";
-        var code     = GetStringField(left, "studyCode") ?? GetStringField(left, "code") ?? id;
-        var customer = GetStringField(left, "customer") ?? "";
-        var planned  = left.GetType().GetProperty("plannedCompletionDate", PropFlags)?.GetValue(left) as DateTime?;
+        var source  = parent ?? presentation;
+        var planned = source.GetType().GetProperty("plannedCompletionDate", PropFlags)?.GetValue(source) as DateTime?;
 
         var flags  = new List<string>();
         string classification, reason;
@@ -157,17 +254,26 @@ public class ExecutionEngine : IExecutionEngine
             reason = "Actual completion is on or before planned.";
         }
 
-        return new StudyCompletionResult
+        var row = ToDict(presentation);
+        // When primary differs from parent, surface parent customer/code so the
+        // user can still see which study a testp/sample belongs to.
+        if (!ReferenceEquals(presentation, parent) && parent is not null)
         {
-            StudyId               = id,
-            StudyCode             = code,
-            Customer              = customer,
-            PlannedCompletionDate = planned,
-            ActualCompletionDate  = actual,
-            Classification        = classification,
-            Reason                = reason,
-            DataQualityFlags      = flags
-        };
+            foreach (var key in new[] { "studyCode", "customer" })
+            {
+                if (!row.ContainsKey(key))
+                {
+                    var val = GetStringField(parent, key);
+                    if (val is not null) row[key] = val;
+                }
+            }
+        }
+        row["plannedCompletionDate"] = planned;
+        row["actualCompletionDate"]  = actual;
+        row["classification"]        = classification;
+        row["reason"]                = reason;
+        row["dataQualityFlags"]      = flags;
+        return row;
     }
 
     // Returns the first service name (not in 'excluding') whose records have the given field.

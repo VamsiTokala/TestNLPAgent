@@ -51,7 +51,7 @@ public record AssistantQueryResponse
     public ExecutionPlan JsonPlan { get; init; } = new();
     public ValidationResult Validation { get; init; } = new();
     public QuerySummary Summary { get; init; } = new();
-    public List<StudyCompletionResult> Results { get; init; } = [];
+    public List<Dictionary<string, object?>> Results { get; init; } = [];
     public Dictionary<string, List<Dictionary<string, object?>>> Datasets { get; init; } = [];
     public string Message { get; init; } = string.Empty;
 }
@@ -71,6 +71,10 @@ public record ExecutionPlan
     public DateTime AsOfTimestamp { get; init; } = DateTime.UtcNow;
     [JsonConverter(typeof(FlexibleStringListConverter))]
     public List<string> Entities { get; init; } = [];
+    // Which contract's rows the plan is ultimately about (e.g. the entity being
+    // counted, listed, or classified). Empty means "default to the side that
+    // owns plannedCompletionDate / the first operation's service".
+    public string PrimaryEntity { get; init; } = string.Empty;
     public List<PlanOperation> Operations { get; init; } = [];
     public PlanCorrelate Correlate { get; init; } = new();
     public PlanTransform Transform { get; init; } = new();
@@ -101,18 +105,6 @@ public record TestPDto(string TestpId, string StudyId, string Status, DateTime? 
 public record ProtocolDto(string ProtocolId, string StudyId, string Version, string Status, DateTime? ApprovedAt, DateTime? ExpiresAt);
 public record SampleDto(string SampleId, string StudyId, string SampleType, string Status, DateTime? CollectedAt, string CollectionSite);
 
-public record StudyCompletionResult
-{
-    public string StudyId { get; init; } = string.Empty;
-    public string StudyCode { get; init; } = string.Empty;
-    public string Customer { get; init; } = string.Empty;
-    public DateTime? PlannedCompletionDate { get; init; }
-    public DateTime? ActualCompletionDate { get; init; }
-    public string Classification { get; init; } = string.Empty;
-    public string Reason { get; init; } = string.Empty;
-    public List<string> DataQualityFlags { get; init; } = [];
-}
-
 public record AuditRecord
 {
     public string TraceId { get; init; } = string.Empty;
@@ -127,5 +119,5 @@ public record AuditRecord
     public DateTime ExecutionStartedAt { get; init; }
     public DateTime ExecutionCompletedAt { get; init; }
     public QuerySummary ResultSummary { get; init; } = new();
-    public List<StudyCompletionResult> ResultSnapshot { get; init; } = [];
+    public List<Dictionary<string, object?>> ResultSnapshot { get; init; } = [];
 }

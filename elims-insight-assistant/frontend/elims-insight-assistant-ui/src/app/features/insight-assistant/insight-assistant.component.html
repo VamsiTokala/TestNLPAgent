@@ -161,8 +161,8 @@
         <span class="ai-bar-provider">{{ response.planGeneratorMode }}</span>
       </div>
 
-      <!-- Summary -->
-      <div class="summary-grid">
+      <!-- Summary — only relevant for timeliness queries -->
+      <div class="summary-grid" *ngIf="hasClassifications()">
         <div class="stat-card on-time">
           <div class="stat-value">{{ response.summary.onTime }}</div>
           <div class="stat-label">On Time</div>
@@ -186,25 +186,24 @@
         <table class="results-table" *ngIf="response.results.length > 0; else noResults">
           <thead>
             <tr>
-              <th>Study Code</th><th>Customer</th><th>Planned</th>
-              <th>Actual</th><th>Classification</th><th>Reason</th>
+              <th *ngFor="let col of resultsColumns()">{{ prettyHeader(col) }}</th>
             </tr>
           </thead>
           <tbody>
             <tr *ngFor="let r of response.results">
-              <td><strong>{{ r.studyCode }}</strong></td>
-              <td>{{ r.customer }}</td>
-              <td>{{ r.plannedCompletionDate ? (r.plannedCompletionDate | date:'MMM d, y') : '—' }}</td>
-              <td>{{ r.actualCompletionDate  ? (r.actualCompletionDate  | date:'MMM d, y') : '—' }}</td>
-              <td>
-                <span class="badge"
-                  [class.on-time]="r.classification === 'On Time'"
-                  [class.delayed]="r.classification === 'Delayed'"
-                  [class.indeterminate]="r.classification === 'Indeterminate'">
-                  {{ r.classification }}
-                </span>
-              </td>
-              <td>{{ r.reason }}</td>
+              <ng-container *ngFor="let col of resultsColumns()">
+                <td *ngIf="isClassificationColumn(col); else plainCell">
+                  <span class="badge"
+                    [class.on-time]="r[col] === 'On Time'"
+                    [class.delayed]="r[col] === 'Delayed'"
+                    [class.indeterminate]="r[col] === 'Indeterminate'">
+                    {{ r[col] }}
+                  </span>
+                </td>
+                <ng-template #plainCell>
+                  <td>{{ formatCell(r[col]) }}</td>
+                </ng-template>
+              </ng-container>
             </tr>
           </tbody>
         </table>

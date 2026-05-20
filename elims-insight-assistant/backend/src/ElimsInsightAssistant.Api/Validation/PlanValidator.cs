@@ -22,29 +22,30 @@ public class PlanValidator(IServiceRegistry registry) : IPlanValidator
         var allowlist = contracts.ToDictionary(
             c => c.Name,
             c => (actions: new HashSet<string> { c.Action }, fields: new HashSet<string>(c.Fields)));
-        var requiredServices = contracts.Where(c => c.IsRequired).Select(c => c.Name).ToHashSet();
 
         var checks = new List<ValidationCheck>();
         var errors = new List<string>();
 
-        // Structural completeness — a partial plan from a confused LLM must not execute
+        // Structural completeness — a partial plan from a confused LLM must not execute.
+        // Note: ServiceContractEntry.IsRequired is metadata (UI hint / capability marker),
+        // not a per-plan constraint. The planner is free to pick whichever contracts a query needs.
         if (string.IsNullOrWhiteSpace(plan.Intent))
             errors.Add("Intent is required");
 
         if (plan.Operations is null || plan.Operations.Count == 0)
             errors.Add("Operations cannot be empty");
 
-        var presentServices = plan.Operations?.Select(o => o.Service).ToHashSet() ?? [];
-        foreach (var svc in requiredServices.Where(s => !presentServices.Contains(s)))
-            errors.Add($"Required service missing: {svc}");
-
         checks.Add(new("Plan completeness",
-            errors.Any(e => e.Contains("Intent") || e.Contains("Operations") ||
-                            e.Contains("service missing"))
+            errors.Any(e => e.Contains("Intent") || e.Contains("Operations"))
                 ? "Failed" : "Passed"));
 
         foreach (var op in plan.Operations ?? [])
         {
+            if (string.IsNullOrWhiteSpace(op.Service))
+            {
+                errors.Add("Operation is missing required 'service' field");
+                continue;
+            }
             if (!allowlist.ContainsKey(op.Service))
             {
                 errors.Add($"Unapproved service: {op.Service}");
@@ -52,22 +53,24 @@ public class PlanValidator(IServiceRegistry registry) : IPlanValidator
             else
             {
                 var entry = allowlist[op.Service];
-                if (!entry.actions.Contains(op.Action))
+                if (!string.IsNullOrWhiteSpace(op.Action) && !entry.actions.Contains(op.Action))
                     errors.Add($"Unapproved action: {op.Service}.{op.Action}");
                 foreach (var field in (op.Select ?? []).Where(f => !entry.fields.Contains(f)))
                     errors.Add($"Unapproved field: {op.Service}.{field}");
                 foreach (var filter in op.Filters ?? [])
                 {
-                    if (!AllowedOperators.Contains(filter.Op.ToLowerInvariant()))
+                    if (string.IsNullOrWhiteSpace(filter.Op) ||
+                        !AllowedOperators.Contains(filter.Op.ToLowerInvariant()))
                         errors.Add($"Unapproved operator: {filter.Op}");
                     if (filter.Value is { Length: > 0 } v &&
                         ForbiddenTokens.Any(t => v.ToLowerInvariant().Contains(t)))
                         errors.Add("Potential code/SQL fragment detected");
                 }
             }
-            if (op.Action.Contains("update", StringComparison.OrdinalIgnoreCase) ||
-                op.Action.Contains("delete", StringComparison.OrdinalIgnoreCase) ||
-                op.Action.Contains("write",  StringComparison.OrdinalIgnoreCase))
+            if (!string.IsNullOrEmpty(op.Action) &&
+                (op.Action.Contains("update", StringComparison.OrdinalIgnoreCase) ||
+                 op.Action.Contains("delete", StringComparison.OrdinalIgnoreCase) ||
+                 op.Action.Contains("write",  StringComparison.OrdinalIgnoreCase)))
                 errors.Add("Write/update/delete operation is forbidden");
         }
 

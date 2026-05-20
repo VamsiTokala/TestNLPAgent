@@ -9,7 +9,10 @@ public record ServiceContractEntry(
     IReadOnlyList<string> Fields,
     string Purpose,       // injected into AI prompt
     string Description,   // shown in UI
-    bool IsRequired = true
+    bool IsRequired = true,
+    // Optional per-field vocabulary so the planner uses literal values that exist
+    // in the data (e.g. {"result": ["Pass","Fail"], "status": ["Completed","Pending"]}).
+    IReadOnlyDictionary<string, IReadOnlyList<string>>? FieldExamples = null
 );
 
 public interface IServiceRegistry
@@ -34,7 +37,14 @@ public class InMemoryServiceRegistry : IServiceRegistry
             Fields: ["studyId", "studyCode", "customer", "legalEntity", "plannedCompletionDate"],
             Purpose: "Provides study identity, customer, legal entity, and planned completion dates",
             Description: "Core study catalogue — identity, customer assignment, legal entity, and planned completion timeline",
-            IsRequired: true));
+            IsRequired: true,
+            FieldExamples: new Dictionary<string, IReadOnlyList<string>>
+            {
+                // Two distinct identifier shapes — the planner uses the pattern to decide
+                // which field a user-supplied identifier (e.g. "ST-006" vs "S6") belongs to.
+                ["studyId"]   = ["S1", "S2", "S3"],
+                ["studyCode"] = ["ST-001", "ST-002", "ST-003"]
+            }));
 
         Register(new ServiceContractEntry(
             Name: "corelabs-service",
@@ -43,7 +53,13 @@ public class InMemoryServiceRegistry : IServiceRegistry
             Fields: ["testpId", "studyId", "status", "completedAt", "runType", "result"],
             Purpose: "Provides TestP execution records — status, run type, result, and actual completion timestamps",
             Description: "TestP execution records — actual completion timestamps are derived from the maximum TestP.completedAt per study",
-            IsRequired: true));
+            IsRequired: true,
+            FieldExamples: new Dictionary<string, IReadOnlyList<string>>
+            {
+                ["status"]  = ["Completed", "Pending"],
+                ["result"]  = ["Pass", "Fail"],
+                ["runType"] = ["Production", "Repeat"]
+            }));
 
         Register(new ServiceContractEntry(
             Name: "sample-service",
@@ -61,7 +77,11 @@ public class InMemoryServiceRegistry : IServiceRegistry
             Fields: ["protocolId", "studyId", "version", "status", "approvedAt", "expiresAt"],
             Purpose: "Provides study protocol records — protocol version, approval status, and expiry dates",
             Description: "Study protocol catalogue — approved versions, status, and expiry timeline",
-            IsRequired: false));
+            IsRequired: false,
+            FieldExamples: new Dictionary<string, IReadOnlyList<string>>
+            {
+                ["status"] = ["Approved", "Draft", "Expired"]
+            }));
     }
 
     public IReadOnlyList<ServiceContractEntry> GetAll() =>

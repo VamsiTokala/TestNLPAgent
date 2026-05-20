@@ -4,60 +4,70 @@ using ElimsInsightAssistant.Api.Models;
 namespace ElimsInsightAssistant.Tests;
 
 // Classification logic lives in ExecutionEngine.ClassifyRecord (internal static).
-// It accepts any object with plannedCompletionDate + optional studyId/studyCode/customer fields.
-// We pass StudyDto directly since it has all those properties.
+// It returns a generic Dictionary<string, object?> so the UI can render dynamic columns.
 
 public class ClassificationTests
 {
     private static StudyDto Study(DateTime? planned) =>
         new("S1", "ST-001", "Acme", "EU", planned);
 
+    private static string Class(Dictionary<string, object?> row) =>
+        row["classification"]?.ToString() ?? "";
+
     [Fact]
     public void OnTime_WhenActualBeforePlanned()
     {
-        var result = ExecutionEngine.ClassifyRecord(Study(new DateTime(2026, 4, 10)), new DateTime(2026, 4, 9), "studyId");
-        Assert.Equal("On Time", result.Classification);
+        var s = Study(new DateTime(2026, 4, 10));
+        var result = ExecutionEngine.ClassifyRecord(s, s, new DateTime(2026, 4, 9));
+        Assert.Equal("On Time", Class(result));
     }
 
     [Fact]
     public void OnTime_WhenActualEqualsPlanned()
     {
-        var result = ExecutionEngine.ClassifyRecord(Study(new DateTime(2026, 4, 10)), new DateTime(2026, 4, 10), "studyId");
-        Assert.Equal("On Time", result.Classification);
+        var s = Study(new DateTime(2026, 4, 10));
+        var result = ExecutionEngine.ClassifyRecord(s, s, new DateTime(2026, 4, 10));
+        Assert.Equal("On Time", Class(result));
     }
 
     [Fact]
     public void Delayed_WhenActualAfterPlanned()
     {
-        var result = ExecutionEngine.ClassifyRecord(Study(new DateTime(2026, 4, 10)), new DateTime(2026, 4, 12), "studyId");
-        Assert.Equal("Delayed", result.Classification);
+        var s = Study(new DateTime(2026, 4, 10));
+        var result = ExecutionEngine.ClassifyRecord(s, s, new DateTime(2026, 4, 12));
+        Assert.Equal("Delayed", Class(result));
     }
 
     [Fact]
     public void Indeterminate_WhenPlannedMissing()
     {
-        var result = ExecutionEngine.ClassifyRecord(Study(null), new DateTime(2026, 4, 12), "studyId");
-        Assert.Equal("Indeterminate", result.Classification);
+        var s = Study(null);
+        var result = ExecutionEngine.ClassifyRecord(s, s, new DateTime(2026, 4, 12));
+        Assert.Equal("Indeterminate", Class(result));
     }
 
     [Fact]
     public void Indeterminate_WhenActualMissing()
     {
-        var result = ExecutionEngine.ClassifyRecord(Study(new DateTime(2026, 4, 10)), null, "studyId");
-        Assert.Equal("Indeterminate", result.Classification);
+        var s = Study(new DateTime(2026, 4, 10));
+        var result = ExecutionEngine.ClassifyRecord(s, s, null);
+        Assert.Equal("Indeterminate", Class(result));
     }
 
     [Fact]
     public void DelayedDayCount_IsCorrect()
     {
-        var result = ExecutionEngine.ClassifyRecord(Study(new DateTime(2026, 4, 10)), new DateTime(2026, 4, 15), "studyId");
-        Assert.Contains("5 day(s)", result.Reason);
+        var s = Study(new DateTime(2026, 4, 10));
+        var result = ExecutionEngine.ClassifyRecord(s, s, new DateTime(2026, 4, 15));
+        Assert.Contains("5 day(s)", result["reason"]?.ToString());
     }
 
     [Fact]
-    public void StudyId_IsMappedFromIdField()
+    public void Row_IncludesRecordFields()
     {
-        var result = ExecutionEngine.ClassifyRecord(Study(new DateTime(2026, 4, 10)), null, "studyId");
-        Assert.Equal("S1", result.StudyId);
+        var s = Study(new DateTime(2026, 4, 10));
+        var result = ExecutionEngine.ClassifyRecord(s, s, null);
+        Assert.Equal("S1", result["studyId"]);
+        Assert.Equal("ST-001", result["studyCode"]);
     }
 }

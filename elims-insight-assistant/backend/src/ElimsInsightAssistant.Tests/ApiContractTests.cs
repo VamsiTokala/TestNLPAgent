@@ -1,10 +1,12 @@
 using ElimsInsightAssistant.Api.Services;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ElimsInsightAssistant.Tests;
 
 public class ApiContractTests
 {
-    private readonly MockPlanGenerator _generator = new(new InMemoryServiceRegistry());
+    private readonly MockPlanGenerator _generator =
+        new(new InMemoryServiceRegistry(), NullLogger<MockPlanGenerator>.Instance);
 
     [Fact]
     public async Task MockGenerator_ReturnsPlan_ForSupportedQuery()

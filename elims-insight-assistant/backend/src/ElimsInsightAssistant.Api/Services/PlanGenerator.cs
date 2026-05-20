@@ -37,9 +37,24 @@ internal static class PromptBuilder
         var sb = new StringBuilder();
         foreach (var c in contracts)
         {
-            sb.AppendLine($"  {c.Name}{(c.IsRequired ? " [REQUIRED]" : " [OPTIONAL]")} → action: {c.Action}");
+            sb.AppendLine($"  {c.Name} → action: {c.Action}");
             sb.AppendLine($"    Purpose: {c.Purpose}");
             sb.AppendLine($"    Fields: {string.Join(", ", c.Fields)}");
+            if (c.FieldExamples is { Count: > 0 })
+            {
+                foreach (var (field, values) in c.FieldExamples)
+                {
+                    // Identifier-shaped columns (e.g. studyId, studyCode) have many
+                    // possible values; treat the list as a SAMPLE that shows the
+                    // shape. Other columns (status, result, ...) are enumerations.
+                    var isIdentifier = field.EndsWith("Id", StringComparison.OrdinalIgnoreCase)
+                                       || field.EndsWith("Code", StringComparison.OrdinalIgnoreCase);
+                    var label = isIdentifier
+                        ? $"Example values for {field} (samples only \u2014 not exhaustive)"
+                        : $"Allowed values for {field} (exhaustive)";
+                    sb.AppendLine($"    {label}: {string.Join(", ", values)}");
+                }
+            }
         }
         return sb.ToString().TrimEnd();
     }
@@ -50,13 +65,39 @@ internal static class PromptBuilder
         var ops = contracts.Select(c =>
         {
             var select = string.Join(", ", c.Fields.Select(f => $"\"{f}\""));
-            var filter = c.Name == "corelabs-service"
-                ? "[{\"field\":\"status\",\"op\":\"=\",\"value\":\"Completed\"}]"
+            var filter = c.Fields.Any(f => f.Equals("status", StringComparison.OrdinalIgnoreCase))
+                ? "[{\"field\":\"status\",\"op\":\"=\",\"value\":\"<value>\"}]"
                 : "[]";
-            return $"      {{ \"service\": \"{c.Name}\", \"action\": \"{c.Action}\", \"select\": [{select}], \"filters\": {filter}, \"reason\": \"why this service is needed for the query\" }}";
+            return $"      {{ \"service\": \"{c.Name}\", \"action\": \"{c.Action}\", \"select\": [{select}], \"filters\": {filter}, \"reason\": \"why this contract is needed for the query\" }}";
         });
         return string.Join(",\n", ops);
     }
+
+    // Full response shape — every field name the deserialiser expects.
+    // Use this for providers that have no native JSON-schema enforcement.
+    internal static string ResponseShape(IReadOnlyList<ServiceContractEntry> contracts) => $$"""
+{
+  "supported": true,
+  "reason": null,
+  "markdown": "ONE short sentence describing the plan",
+  "plan": {
+    "version": "1.0",
+    "intent": "<snake_case_verb_phrase_derived_from_the_query>",
+    "entities": ["<entity1>", "<entity2_if_join>"],
+    "primaryEntity": "<contract-name-the-result-is-about>",
+    "operations": [
+{{ExampleOperations(contracts)}}
+    ],
+    "correlate": { "leftEntity": "", "rightEntity": "", "leftField": "", "rightField": "" },
+    "output": { "includeClassifications": ["On Time", "Delayed", "Indeterminate"] },
+    "limits": { "maxRows": 500, "pagination": false }
+  }
+}
+Field rules: each operation MUST use keys "service", "action", "select", "filters", "reason".
+Do NOT rename them to "entity", "type", "function", or "condition". "service" MUST be one of the contract names listed above.
+"Allowed values for <field> (exhaustive)" lines are a strict whitelist — only those literal values may be used as filter values for that field.
+"Example values for <field> (samples only — not exhaustive)" lines show the SHAPE of identifier values — user identifiers that match the shape MUST be accepted even if the exact value is not in the sample list. Never declare an identifier 'unsupported' just because it isn't in the sample list.
+""";
 
     // The invariant sections shared across Gemini and OpenAI prompts.
     internal static string CoreInstructions(IReadOnlyList<ServiceContractEntry> contracts)
@@ -88,19 +129,40 @@ CLASSIFICATION RULES (use ONLY when the query is about completion timeliness):
 - "Indeterminate":  plannedCompletionDate is null OR actualCompletionDate is null
 
 BUILDING THE PLAN
-1. Identify which contracts provide the data needed. Include ALL contracts required
-   (both sides of any join).
+1. Pick ONLY the contracts whose data the query actually needs. Do not include
+   unrelated contracts. For a join, include both sides on a shared field.
 2. Set intent to a short snake_case verb-phrase that describes what the user wants
    — derive it from the query, do NOT use a fixed template.
-3. For joins, populate correlate with leftEntity, rightEntity, leftField, rightField
+3. Set primaryEntity to the contract name whose ROWS the answer is about
+   (e.g. "count testps where ..." → primaryEntity is the testp contract; "list
+   studies that ..." → primaryEntity is the study contract).
+4. For joins, populate correlate with leftEntity, rightEntity, leftField, rightField
    identifying the shared key between the two contracts.
-4. Set output.includeClassifications:
+5. Set output.includeClassifications ONLY when the question asks WHICH records
+   are on time / delayed / indeterminate (timeliness is the answer or the
+   filter). Use this mapping:
    - delayed / late / overdue / not-on-time / behind  → ["Delayed", "Indeterminate"]
    - only delayed                                      → ["Delayed"]
    - only indeterminate / missing data                 → ["Indeterminate"]
    - on time / met deadline / finished early           → ["On Time"]
-   - all / count / overview / non-timeliness query     → ["On Time", "Delayed", "Indeterminate"]
-5. Fill "reason" on each operation explaining why that contract is needed.
+   For plain counts, lists, listings, or filters that have nothing to do with
+   timeliness, leave includeClassifications as [] — do NOT default to all three.
+   When the user counts or lists records of one entity and timeliness applies to
+   a different entity (e.g. "count testps where parent study is on time"),
+   STILL set includeClassifications to filter by parent timeliness — the engine
+   will apply it to primaryEntity rows via the join.
+6. Filter values:
+   - For fields shown with "Allowed values for <field> (exhaustive)": use ONLY
+     one of those literal values; if the user's word doesn't match, omit the filter.
+   - For fields shown with "Example values for <field> (samples only)": those
+     are PATTERN hints. Accept any user-supplied identifier whose shape matches
+     (e.g. "ST-006" matches studyCode pattern "ST-###"; "S6" matches studyId
+     pattern "S#"). Do NOT mark the query unsupported because an identifier
+     isn't in the sample list — the actual data contains many more values.
+   - If the identifier belongs to a different contract than the primaryEntity,
+     include that contract too and correlate the two on their shared key
+     (e.g. studyId).
+7. Fill "reason" on each operation explaining why that contract is needed.
 
 OUTPUT
 If supported = true:
@@ -264,10 +326,10 @@ public class GeminiPlanGenerator(IConfiguration config, IServiceRegistry registr
     {
         var contracts = registry.GetAll();
         var coreInstructions = PromptBuilder.CoreInstructions(contracts);
-        var exampleOps = PromptBuilder.ExampleOperations(contracts);
+        var responseShape = PromptBuilder.ResponseShape(contracts);
 
         return $$"""
-You are a governed analytics plan generator for a laboratory information management system (LIMS).
+You are a governed analytics plan generator over the registered service contracts below.
 
 {{coreInstructions}}
 
@@ -275,23 +337,7 @@ Respond ONLY with a valid JSON object — no markdown fences, no trailing text, 
 Use this exact structure. For a supported query set supported=true and populate plan.
 For an unsupported query set supported=false, set reason, and set markdown and plan to null.
 
-{
-  "supported": true,
-  "reason": null,
-  "markdown": "ONE short sentence describing the plan",
-  "plan": {
-    "version": "1.0",
-    "intent": "<snake_case_verb_phrase_derived_from_the_query>",
-    "entities": ["<entity1>", "<entity2_if_join>"],
-    "operations": [
-{{exampleOps}}
-    ],
-    "output": {
-      "includeClassifications": ["Delayed", "Indeterminate"]
-    },
-    "limits": { "maxRows": 500, "pagination": false }
-  }
-}
+{{responseShape}}
 
 User query: {{query}}
 """;
@@ -408,6 +454,7 @@ public class OpenAiPlanGenerator(IConfiguration config, IServiceRegistry registr
                 "version":  { "type": "string" },
                 "intent":   { "type": "string" },
                 "entities": { "type": "array", "items": { "type": "string" } },
+                "primaryEntity": { "type": "string" },
                 "operations": {
                   "type": "array",
                   "items": {
@@ -456,7 +503,7 @@ public class OpenAiPlanGenerator(IConfiguration config, IServiceRegistry registr
                   "additionalProperties": false
                 }
               },
-              "required": ["version", "intent", "entities", "operations", "output", "limits"],
+              "required": ["version", "intent", "entities", "primaryEntity", "operations", "output", "limits"],
               "additionalProperties": false
             },
             { "type": "null" }
@@ -473,7 +520,7 @@ public class OpenAiPlanGenerator(IConfiguration config, IServiceRegistry registr
         try
         {
             var systemPrompt =
-                "You are a governed analytics plan generator for a laboratory information management system (LIMS).\n\n" +
+                "You are a governed analytics plan generator over the registered service contracts below.\n\n" +
                 PromptBuilder.CoreInstructions(registry.GetAll());
 
             var completion = await _client.CompleteChatAsync(
@@ -549,13 +596,16 @@ public class OpenRouterPlanGenerator(IConfiguration config, IServiceRegistry reg
         const int maxAttempts = 3;
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
 
+        var contracts = registry.GetAll();
         var systemPrompt =
-            "You are a governed analytics plan generator for a laboratory information management system (LIMS).\n\n" +
-            PromptBuilder.CoreInstructions(registry.GetAll()) +
+            "You are a governed analytics plan generator over the registered service contracts below.\n\n" +
+            PromptBuilder.CoreInstructions(contracts) +
             "\n\nRespond ONLY with a valid JSON object — no markdown fences, no trailing text.\n" +
             "For a supported query set supported=true and populate plan.\n" +
             "For an unsupported query set supported=false, set reason, and set markdown and plan to null.\n" +
-            "IMPORTANT: Keep the markdown field to ONE short sentence (max 20 words). Do not write bullet points or steps.";
+            "Keep the markdown field to ONE short sentence (max 20 words). No bullet points, no steps.\n\n" +
+            "REQUIRED RESPONSE SHAPE — use these exact key names:\n" +
+            PromptBuilder.ResponseShape(contracts);
 
         logger.LogInformation("OpenRouter ({Model}) → query: {Query}", _model, query);
         logger.LogInformation("OpenRouter → system prompt:\n{Prompt}", systemPrompt);
