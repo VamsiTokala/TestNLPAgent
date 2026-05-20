@@ -52,6 +52,7 @@ public record AssistantQueryResponse
     public ValidationResult Validation { get; init; } = new();
     public QuerySummary Summary { get; init; } = new();
     public List<StudyCompletionResult> Results { get; init; } = [];
+    public Dictionary<string, List<Dictionary<string, object?>>> Datasets { get; init; } = [];
     public string Message { get; init; } = string.Empty;
 }
 
@@ -97,6 +98,8 @@ public record PlanLimits(int MaxRows, bool Pagination);
 
 public record StudyDto(string StudyId, string StudyCode, string Customer, string LegalEntity, DateTime? PlannedCompletionDate);
 public record TestPDto(string TestpId, string StudyId, string Status, DateTime? CompletedAt, string RunType, string? Result);
+public record ProtocolDto(string ProtocolId, string StudyId, string Version, string Status, DateTime? ApprovedAt, DateTime? ExpiresAt);
+public record SampleDto(string SampleId, string StudyId, string SampleType, string Status, DateTime? CollectedAt, string CollectionSite);
 
 public record StudyCompletionResult
 {

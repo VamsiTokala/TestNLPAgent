@@ -91,14 +91,16 @@ public class AssistantController(
         var traceId = $"TRACE-{Guid.NewGuid():N}";
         var planId  = $"PLAN-{Guid.NewGuid():N}";
         var started = DateTime.UtcNow;
-        var (summary, rows, servicesCalled) = await executionEngine.ExecuteAsync(result.Plan, request.UserContext);
+        var execution = await executionEngine.ExecuteAsync(result.Plan, request.UserContext);
         var finished = DateTime.UtcNow;
 
         logger.LogInformation(
-            "Execution complete | traceId={TraceId} | services={Services} | rows={Rows} | onTime={OnTime} | delayed={Delayed} | indeterminate={Indeterminate} | elapsed={Elapsed}ms",
+            "Execution complete | traceId={TraceId} | services={Services} | classifiedRows={Rows} | datasets={Datasets} | onTime={OnTime} | delayed={Delayed} | indeterminate={Indeterminate} | elapsed={Elapsed}ms",
             traceId,
-            string.Join(", ", servicesCalled),
-            rows.Count, summary.OnTime, summary.Delayed, summary.Indeterminate,
+            string.Join(", ", execution.ServicesCalled),
+            execution.Rows.Count,
+            string.Join(", ", execution.Datasets.Select(d => $"{d.Key}={d.Value.Count}")),
+            execution.Summary.OnTime, execution.Summary.Delayed, execution.Summary.Indeterminate,
             (int)(finished - started).TotalMilliseconds);
 
         var response = new AssistantQueryResponse
@@ -109,8 +111,9 @@ public class AssistantController(
             MarkdownPlan      = result.Markdown,
             JsonPlan          = result.Plan,
             Validation        = validation,
-            Summary           = summary,
-            Results           = rows
+            Summary           = execution.Summary,
+            Results           = execution.Rows,
+            Datasets          = execution.Datasets
         };
 
         auditService.Save(new AuditRecord
@@ -123,11 +126,11 @@ public class AssistantController(
             JsonPlan             = result.Plan,
             ValidationStatus     = validation.Status,
             ValidationChecks     = validation.Checks,
-            ServicesCalled       = servicesCalled,
+            ServicesCalled       = execution.ServicesCalled,
             ExecutionStartedAt   = started,
             ExecutionCompletedAt = finished,
-            ResultSummary        = summary,
-            ResultSnapshot       = rows
+            ResultSummary        = execution.Summary,
+            ResultSnapshot       = execution.Rows
         });
 
         return Ok(response);
@@ -154,8 +157,8 @@ public class AssistantController(
     {
         var validation = validator.Validate(request.Plan);
         if (validation.Status != "Passed") return BadRequest(validation);
-        var (summary, rows, _) = await executionEngine.ExecuteAsync(request.Plan, request.UserContext);
-        return Ok(new { summary, results = rows, validation });
+        var execution = await executionEngine.ExecuteAsync(request.Plan, request.UserContext);
+        return Ok(new { summary = execution.Summary, results = execution.Rows, datasets = execution.Datasets, validation });
     }
 
     [HttpGet("audit/{traceId}")]

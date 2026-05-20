@@ -1,0 +1,17 @@
+[
+  {"sampleId":"SM1",  "studyId":"S1",  "sampleType":"Blood",  "status":"Received",  "collectedAt":"2026-04-01T08:00:00Z", "collectionSite":"Site-A"},
+  {"sampleId":"SM2",  "studyId":"S1",  "sampleType":"Urine",  "status":"Received",  "collectedAt":"2026-04-02T09:30:00Z", "collectionSite":"Site-A"},
+  {"sampleId":"SM3",  "studyId":"S2",  "sampleType":"Blood",  "status":"Received",  "collectedAt":"2026-04-05T10:00:00Z", "collectionSite":"Site-B"},
+  {"sampleId":"SM4",  "studyId":"S2",  "sampleType":"Plasma", "status":"Rejected",  "collectedAt":"2026-04-06T11:00:00Z", "collectionSite":"Site-B"},
+  {"sampleId":"SM5",  "studyId":"S3",  "sampleType":"Blood",  "status":"Received",  "collectedAt":"2026-04-08T08:30:00Z", "collectionSite":"Site-C"},
+  {"sampleId":"SM6",  "studyId":"S4",  "sampleType":"Tissue", "status":"Pending",   "collectedAt":null,                   "collectionSite":"Site-A"},
+  {"sampleId":"SM7",  "studyId":"S5",  "sampleType":"Blood",  "status":"Received",  "collectedAt":"2026-03-28T07:00:00Z", "collectionSite":"Site-D"},
+  {"sampleId":"SM8",  "studyId":"S5",  "sampleType":"Urine",  "status":"Received",  "collectedAt":"2026-03-29T10:00:00Z", "collectionSite":"Site-D"},
+  {"sampleId":"SM9",  "studyId":"S6",  "sampleType":"Blood",  "status":"Received",  "collectedAt":"2026-04-03T09:00:00Z", "collectionSite":"Site-A"},
+  {"sampleId":"SM10", "studyId":"S7",  "sampleType":"Plasma", "status":"Received",  "collectedAt":"2026-04-18T11:00:00Z", "collectionSite":"Site-C"},
+  {"sampleId":"SM11", "studyId":"S8",  "sampleType":"Blood",  "status":"Received",  "collectedAt":"2026-04-10T08:00:00Z", "collectionSite":"Site-B"},
+  {"sampleId":"SM12", "studyId":"S9",  "sampleType":"Tissue", "status":"Received",  "collectedAt":"2026-04-26T13:00:00Z", "collectionSite":"Site-D"},
+  {"sampleId":"SM13", "studyId":"S10", "sampleType":"Blood",  "status":"Received",  "collectedAt":"2026-04-15T09:30:00Z", "collectionSite":"Site-A"},
+  {"sampleId":"SM14", "studyId":"S11", "sampleType":"Urine",  "status":"Rejected",  "collectedAt":"2026-04-07T08:00:00Z", "collectionSite":"Site-B"},
+  {"sampleId":"SM15", "studyId":"S12", "sampleType":"Blood",  "status":"Pending",   "collectedAt":null,                   "collectionSite":"Site-C"}
+]
