@@ -16,7 +16,7 @@ export class InsightAssistantApiService {
       provider: provider ?? null,
       userContext: {
         userId: 'demo-user',
-        roles: ['StudyViewer', 'CoreLabsViewer'],
+        roles: ['DataViewer'],
         legalEntities: ['EU', 'US']
       }
     });

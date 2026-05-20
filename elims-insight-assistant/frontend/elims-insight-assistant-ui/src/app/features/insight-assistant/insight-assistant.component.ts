@@ -17,8 +17,9 @@ export class InsightAssistantComponent implements OnInit {
   examples = [
     'Find studies not completed on time',
     'Show delayed studies',
-    'Show indeterminate studies',
-    'Show completed late studies'
+    'List active protocols',
+    'Show samples received this year',
+    'Count all studies'
   ];
 
   response: AssistantQueryResponse | null = null;
@@ -69,7 +70,7 @@ export class InsightAssistantComponent implements OnInit {
   }
 
   constructor(private fb: FormBuilder, private api: InsightAssistantApiService, private zone: NgZone) {
-    this.form = this.fb.group({ query: ['Find studies not completed on time'] });
+    this.form = this.fb.group({ query: [''] });
     this.addForm = this.fb.group({
       name:        ['', Validators.required],
       displayName: ['', Validators.required],

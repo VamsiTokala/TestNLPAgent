@@ -35,7 +35,6 @@ builder.Services.AddScoped<IStudyServiceClient,    DemoStudyServiceClient>();
 builder.Services.AddScoped<ICoreLabsServiceClient, DemoCoreLabsServiceClient>();
 builder.Services.AddScoped<IProtocolServiceClient, DemoProtocolServiceClient>();
 builder.Services.AddScoped<ISampleServiceClient,   DemoSampleServiceClient>();
-builder.Services.AddScoped<IClassificationService, StudyCompletionClassificationService>();
 builder.Services.AddScoped<IExecutionEngine, ExecutionEngine>();
 
 var app = builder.Build();
