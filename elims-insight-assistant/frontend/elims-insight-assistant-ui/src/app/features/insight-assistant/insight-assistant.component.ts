@@ -1,4 +1,4 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, NgZone, OnInit } from '@angular/core';
 import { FormBuilder, FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { NgFor, NgIf, JsonPipe, DatePipe } from '@angular/common';
 import { timeout, TimeoutError } from 'rxjs';
@@ -44,7 +44,7 @@ export class InsightAssistantComponent implements OnInit {
     return this.response?.validation?.checks?.every(c => c.status === 'Passed') ?? false;
   }
 
-  constructor(private fb: FormBuilder, private api: InsightAssistantApiService) {
+  constructor(private fb: FormBuilder, private api: InsightAssistantApiService, private zone: NgZone) {
     this.form = this.fb.group({ query: ['Find studies not completed on time'] });
     this.addForm = this.fb.group({
       name:        ['', Validators.required],
@@ -58,9 +58,9 @@ export class InsightAssistantComponent implements OnInit {
   }
 
   ngOnInit(): void {
-    this.api.getContracts().subscribe({ next: c => this.contracts = c });
+    this.api.getContracts().subscribe({ next: c => this.zone.run(() => this.contracts = c) });
     this.api.getProviders().subscribe({
-      next: p => { this.providers = p; this.selectedProvider = p[0]?.id ?? null; }
+      next: p => this.zone.run(() => { this.providers = p; this.selectedProvider = p[0]?.id ?? null; })
     });
   }
 
@@ -76,22 +76,26 @@ export class InsightAssistantComponent implements OnInit {
       .pipe(timeout(55000))
       .subscribe({
         next: (r: AssistantQueryResponse) => {
-          this._clearSlow();
-          this.response = r;
-          this.isLoading = false;
+          this.zone.run(() => {
+            this._clearSlow();
+            this.response = r;
+            this.isLoading = false;
+          });
         },
         error: (err) => {
-          this._clearSlow();
-          this.isLoading = false;
-          if (err instanceof TimeoutError) {
-            this.error = 'Request timed out after 55 s. Free-tier providers can be slow — try again or switch to Mock.';
-          } else if (err?.status === 503) {
-            this.error = err?.error?.message ?? 'AI provider temporarily unavailable — try again or switch to Mock.';
-          } else if (err?.status === 400) {
-            this.error = 'Validation failed: ' + (err?.error?.errors?.join(', ') ?? JSON.stringify(err?.error));
-          } else {
-            this.error = err?.error?.message ?? err?.error?.title ?? `Unexpected error (HTTP ${err?.status ?? '?'}).`;
-          }
+          this.zone.run(() => {
+            this._clearSlow();
+            this.isLoading = false;
+            if (err instanceof TimeoutError) {
+              this.error = 'Request timed out after 55 s. Free-tier providers can be slow — try again or switch to Mock.';
+            } else if (err?.status === 503) {
+              this.error = err?.error?.message ?? 'AI provider temporarily unavailable — try again or switch to Mock.';
+            } else if (err?.status === 400) {
+              this.error = 'Validation failed: ' + (err?.error?.errors?.join(', ') ?? JSON.stringify(err?.error));
+            } else {
+              this.error = err?.error?.message ?? err?.error?.title ?? `Unexpected error (HTTP ${err?.status ?? '?'}).`;
+            }
+          });
         }
       });
   }
