@@ -13,6 +13,9 @@ builder.Services.AddSwaggerGen();
 var geminiKey     = builder.Configuration["Gemini:ApiKey"];
 var openRouterKey = builder.Configuration["OpenRouter:ApiKey"];
 
+Console.WriteLine($"[CONFIG] Gemini:ApiKey      = {(string.IsNullOrWhiteSpace(geminiKey)     ? "NOT SET" : $"set ({geminiKey!.Length} chars)")}");
+Console.WriteLine($"[CONFIG] OpenRouter:ApiKey  = {(string.IsNullOrWhiteSpace(openRouterKey) ? "NOT SET" : $"set ({openRouterKey!.Length} chars)")}");
+
 // Register every available generator — controller picks one per request
 builder.Services.AddSingleton<MockPlanGenerator>();
 if (!string.IsNullOrWhiteSpace(geminiKey))     builder.Services.AddSingleton<GeminiPlanGenerator>();
