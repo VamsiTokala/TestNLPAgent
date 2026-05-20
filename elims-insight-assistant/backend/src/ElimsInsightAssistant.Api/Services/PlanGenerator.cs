@@ -75,19 +75,25 @@ CLASSIFICATION RULES:
 - "Delayed": actualCompletionDate > plannedCompletionDate (both dates present)
 - "Indeterminate": plannedCompletionDate is null OR actualCompletionDate is null
 
-SUPPORTED QUERY TYPES (set supported = true):
-- Studies not completed on time: delayed, overdue, late, missed deadline
-- Indeterminate studies: missing planned or actual completion date
-- Filter/show studies by classification: "filter studies with classification X",
-  "show delayed studies", "show indeterminate studies", "show on time studies"
-- Any combination of the above classifications
+SUPPORTED QUERY TYPES (set supported = true for ALL of these):
+- Studies not completed on time: delayed, overdue, late, missed deadline, behind schedule
+- Indeterminate studies: missing dates, unknown status
+- Showing/listing/counting studies by classification: on time, delayed, indeterminate
+- "show all studies" / "list studies" / "all studies" / "how many studies" / "study count" / "total studies"
+  → treat as: show all studies with their timeliness classification (use all three classifications)
+- Any query about study completion, study status, study timeliness, or study summaries
+- COUNT/TOTAL queries about studies → still supported; return all studies so the UI can show counts
+
+WHEN IN DOUBT: if the query mentions "studies" in any context related to completion,
+status, counts, or timeliness — set supported=true. Only set supported=false for
+queries clearly unrelated to studies (e.g. weather, invoices, employee records).
 
 SET output.includeClassifications based on the query intent:
-- "show delayed studies" or "not completed on time" or "late" → ["Delayed", "Indeterminate"]
-- "show only delayed" or "filter studies with classification Delayed" → ["Delayed"]
-- "show only indeterminate" or "filter studies with classification Indeterminate" → ["Indeterminate"]
-- "show on time studies" or "filter studies with classification On Time" → ["On Time"]
-- "show all studies" or all three classifications requested → ["On Time", "Delayed", "Indeterminate"]
+- "not completed on time" / "late" / "delayed" / "overdue" / "behind" → ["Delayed", "Indeterminate"]
+- "show only delayed" / "classification Delayed" → ["Delayed"]
+- "show only indeterminate" / "classification Indeterminate" → ["Indeterminate"]
+- "show on time" / "classification On Time" → ["On Time"]
+- "show all" / "list all" / "all studies" / "how many" / "count" / "total" / "summary" → ["On Time", "Delayed", "Indeterminate"]
 
 FOR EACH SELECTED OPERATION, provide a brief "reason" explaining why that service
 is needed to answer this specific query.
@@ -121,7 +127,10 @@ public class MockPlanGenerator(IServiceRegistry registry, ILogger<MockPlanGenera
         "not completed on time", "delayed studies", "completed late", "not on time",
         "indeterminate", "classification indeterminate", "classification delayed",
         "classification on time", "filter studies with classification",
-        "show delayed", "show indeterminate", "show on time", "show all studies"
+        "show delayed", "show indeterminate", "show on time", "show all studies",
+        "show studies", "list studies", "all studies", "how many studies",
+        "study count", "total studies", "study status", "study summary",
+        "overdue", "behind schedule", "missed deadline", "on time studies"
     ];
 
     public Task<PlanGeneratorResult> GenerateAsync(string query)
@@ -191,7 +200,10 @@ Read-only, deterministic, approved service contracts only.
         if (q.Contains("classification delayed"))       return ["Delayed"];
         if (q.Contains("classification on time"))       return ["On Time"];
 
-        if (q.Contains("show all studies") ||
+        if (q.Contains("show all studies") || q.Contains("list studies") ||
+            q.Contains("all studies") || q.Contains("how many") ||
+            q.Contains("study count") || q.Contains("total studies") ||
+            q.Contains("study summary") || q.Contains("study status") ||
             (q.Contains("on time") && q.Contains("delayed") && q.Contains("indeterminate")))
             return ["On Time", "Delayed", "Indeterminate"];
 
