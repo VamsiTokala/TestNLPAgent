@@ -1,4 +1,42 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
 namespace ElimsInsightAssistant.Api.Models;
+
+/// <summary>
+/// Accepts any JSON value for a string-list field: null → [], string → [value], array-of-strings → as-is.
+/// Needed because some AI providers (e.g. OpenRouter) occasionally return "entities" as a plain string.
+/// </summary>
+internal sealed class FlexibleStringListConverter : JsonConverter<List<string>>
+{
+    public override List<string> Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        switch (reader.TokenType)
+        {
+            case JsonTokenType.Null:
+                return [];
+            case JsonTokenType.String:
+                return [reader.GetString() ?? string.Empty];
+            case JsonTokenType.StartArray:
+                var list = new List<string>();
+                while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
+                    list.Add(reader.TokenType == JsonTokenType.String
+                        ? reader.GetString() ?? string.Empty
+                        : reader.GetRawText());
+                return list;
+            default:
+                reader.Skip();
+                return [];
+        }
+    }
+
+    public override void Write(Utf8JsonWriter writer, List<string> value, JsonSerializerOptions options)
+    {
+        writer.WriteStartArray();
+        foreach (var s in value) writer.WriteStringValue(s);
+        writer.WriteEndArray();
+    }
+}
 
 public record NaturalLanguageQueryRequest(string Query, UserContext UserContext, string? Provider = null);
 public record UserContext(string UserId, List<string> Roles, List<string> LegalEntities);
@@ -30,6 +68,7 @@ public record ExecutionPlan
     public string Version { get; init; } = "1.0";
     public string Intent { get; init; } = string.Empty;
     public DateTime AsOfTimestamp { get; init; } = DateTime.UtcNow;
+    [JsonConverter(typeof(FlexibleStringListConverter))]
     public List<string> Entities { get; init; } = [];
     public List<PlanOperation> Operations { get; init; } = [];
     public PlanCorrelate Correlate { get; init; } = new();
