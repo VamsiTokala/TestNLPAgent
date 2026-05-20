@@ -102,8 +102,12 @@
         <button *ngFor="let p of providers"
                 class="provider-btn"
                 [class.provider-btn--active]="selectedProvider === p.id"
-                (click)="selectedProvider = p.id"
-                [disabled]="isLoading">{{ p.name }}</button>
+                [class.provider-btn--unavailable]="!p.available"
+                [title]="p.available ? p.name : p.name + ' — add API key to enable'"
+                (click)="p.available && !isLoading && (selectedProvider = p.id)"
+                [disabled]="isLoading || !p.available">
+          {{ p.name }}<span class="provider-btn-lock" *ngIf="!p.available"> 🔒</span>
+        </button>
       </div>
     </div>
     <div class="query-row">

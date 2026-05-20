@@ -185,8 +185,10 @@ $slate-900: #0f172a;
   transition: all .12s;
   &:hover:not(:disabled) { border-color: $blue; color: $blue; background: #eff6ff; }
   &--active { background: $blue; color: #fff; border-color: $blue; }
+  &--unavailable { opacity: .5; cursor: not-allowed; border-style: dashed; }
   &:disabled { opacity: .5; cursor: default; }
 }
+.provider-btn-lock { font-size: .65rem; margin-left: .15rem; }
 
 .query-row {
   display: flex; gap: .65rem; align-items: center; margin-bottom: .75rem;

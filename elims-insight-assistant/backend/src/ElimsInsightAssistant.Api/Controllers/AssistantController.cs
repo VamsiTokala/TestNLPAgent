@@ -22,14 +22,14 @@ public class AssistantController(
     [HttpGet("providers")]
     public IActionResult GetProviders()
     {
+        var gemini     = serviceProvider.GetService<GeminiPlanGenerator>();
+        var openRouter = serviceProvider.GetService<OpenRouterPlanGenerator>();
         var all = new List<object>
         {
-            new { id = "mock", name = "Mock (keyword matching)", available = true }
+            new { id = "mock",       name = "Mock (keyword matching)",                        available = true },
+            new { id = "gemini",     name = gemini?.ProviderName     ?? "Gemini 2.5 Flash",   available = gemini     is not null },
+            new { id = "openrouter", name = openRouter?.ProviderName ?? "OpenRouter",          available = openRouter is not null }
         };
-        if (serviceProvider.GetService<GeminiPlanGenerator>()     is { } g)
-            all.Add(new { id = "gemini",     name = g.ProviderName,     available = true });
-        if (serviceProvider.GetService<OpenRouterPlanGenerator>() is { } r)
-            all.Add(new { id = "openrouter", name = r.ProviderName,     available = true });
         return Ok(all);
     }
 
