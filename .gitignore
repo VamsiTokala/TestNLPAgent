@@ -10,3 +10,7 @@ obj/
 # NuGet
 *.nupkg
 packages/
+
+# Local secrets — never commit real API keys
+appsettings.Development.json
+appsettings.Local.json
