@@ -96,17 +96,16 @@ SET output.includeClassifications to the smallest set that fully answers the int
 FOR EACH SELECTED OPERATION, provide a brief "reason" explaining why that service
 is needed to answer this specific query.
 
-If the query IS about study completion timeliness or classification filtering:
+If the query IS about studies (any phrasing):
   - Set supported = true, reason = null
-  - Write a clear markdown plan explaining the steps
+  - Set markdown to one short sentence describing the plan
   - Populate plan with version "1.0", intent "find_studies_not_completed_on_time",
     the required service operations with reasons, output.includeClassifications,
     and limits maxRows 500
   - IMPORTANT: intent, entities, and operations MUST all be fully populated.
     Never return blank intent or empty operations when supported=true.
-    If you cannot determine the full plan, set supported=false instead.
 
-If the query is NOT about study completion timeliness:
+If the query has NOTHING to do with studies (e.g. weather, invoices, HR, equipment):
   - Set supported = false
   - Set reason to a one-sentence explanation
   - Set markdown = null and plan = null
