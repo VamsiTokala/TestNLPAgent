@@ -14,7 +14,7 @@
         <h3>Service Catalogue</h3>
         <span class="catalogue-count">{{ contracts.length }} contract{{ contracts.length !== 1 ? 's' : '' }}</span>
         <span class="catalogue-selected" *ngIf="response?.status === 'Completed'">
-          · {{ response!.jsonPlan.operations.length }} of {{ contracts.length }} selected by AI
+          · {{ selectedServicesCount }} of {{ contracts.length }} selected by AI
         </span>
       </div>
       <button class="btn-add" (click)="showAddForm = !showAddForm">
