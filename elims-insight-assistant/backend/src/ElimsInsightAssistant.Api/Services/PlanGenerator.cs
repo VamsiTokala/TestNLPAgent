@@ -75,25 +75,42 @@ CLASSIFICATION RULES:
 - "Delayed": actualCompletionDate > plannedCompletionDate (both dates present)
 - "Indeterminate": plannedCompletionDate is null OR actualCompletionDate is null
 
-SUPPORTED QUERY TYPES (set supported = true for ALL of these):
-- Studies not completed on time: delayed, overdue, late, missed deadline, behind schedule
-- Indeterminate studies: missing dates, unknown status
-- Showing/listing/counting studies by classification: on time, delayed, indeterminate
-- "show all studies" / "list studies" / "all studies" / "how many studies" / "study count" / "total studies"
-  → treat as: show all studies with their timeliness classification (use all three classifications)
-- Any query about study completion, study status, study timeliness, or study summaries
-- COUNT/TOTAL queries about studies → still supported; return all studies so the UI can show counts
+SUPPORTED QUERY TYPES — set supported=true for ANY of these intents:
+1. DELAYED / PROBLEM studies (missed or at risk):
+   delayed, overdue, late, past due, behind schedule, running late, missed deadline,
+   not completed on time, not on time, exceeded deadline, at risk, need attention,
+   problematic, struggling, haven't finished, not finished, still open
 
-WHEN IN DOUBT: if the query mentions "studies" in any context related to completion,
-status, counts, or timeliness — set supported=true. Only set supported=false for
-queries clearly unrelated to studies (e.g. weather, invoices, employee records).
+2. INDETERMINATE / MISSING DATA studies:
+   indeterminate, missing dates, unknown status, no completion date, without dates,
+   incomplete data, no planned date, no actual date, status unknown
 
-SET output.includeClassifications based on the query intent:
-- "not completed on time" / "late" / "delayed" / "overdue" / "behind" → ["Delayed", "Indeterminate"]
-- "show only delayed" / "classification Delayed" → ["Delayed"]
-- "show only indeterminate" / "classification Indeterminate" → ["Indeterminate"]
-- "show on time" / "classification On Time" → ["On Time"]
-- "show all" / "list all" / "all studies" / "how many" / "count" / "total" / "summary" → ["On Time", "Delayed", "Indeterminate"]
+3. ON TIME / SUCCESSFUL studies:
+   on time, completed on time, met deadline, ahead of schedule, finished early,
+   completed early, within deadline, no issues, successful, good standing
+
+4. ALL / OVERVIEW queries (use all three classifications):
+   show all, list all, all studies, how many, count, total, summary, breakdown,
+   overview, dashboard, report, status of studies, study status, what studies,
+   which studies, give me studies, find studies
+
+WHEN IN DOUBT: if a query mentions "studies" at all (show, list, find, count, get,
+which, what, are there, how many), set supported=true and use the most appropriate
+classifications. Only set supported=false for queries clearly unrelated to studies
+(e.g. weather, invoices, employee HR records, equipment).
+
+SET output.includeClassifications to the MINIMUM set that answers the question:
+- Delayed/problem/at-risk/late/overdue/past due/not on time/behind/need attention
+    → ["Delayed", "Indeterminate"]
+- Only delayed / just delayed / exclusively delayed
+    → ["Delayed"]
+- Only indeterminate / just indeterminate / missing dates only
+    → ["Indeterminate"]
+- On time / completed on time / met deadline / finished early / successful
+    → ["On Time"]
+- All / overview / breakdown / count / total / summary / status / dashboard /
+  any combination of multiple classifications / unclear intent
+    → ["On Time", "Delayed", "Indeterminate"]
 
 FOR EACH SELECTED OPERATION, provide a brief "reason" explaining why that service
 is needed to answer this specific query.
@@ -124,13 +141,22 @@ public class MockPlanGenerator(IServiceRegistry registry, ILogger<MockPlanGenera
 
     private static readonly string[] SupportedTerms =
     [
-        "not completed on time", "delayed studies", "completed late", "not on time",
-        "indeterminate", "classification indeterminate", "classification delayed",
-        "classification on time", "filter studies with classification",
-        "show delayed", "show indeterminate", "show on time", "show all studies",
-        "show studies", "list studies", "all studies", "how many studies",
-        "study count", "total studies", "study status", "study summary",
-        "overdue", "behind schedule", "missed deadline", "on time studies"
+        // delayed / problem
+        "not completed on time", "not on time", "delayed", "overdue", "late",
+        "past due", "behind schedule", "running late", "missed deadline",
+        "exceeded deadline", "at risk", "need attention", "haven't finished",
+        "not finished", "still open", "problematic",
+        // indeterminate / missing
+        "indeterminate", "missing date", "no completion date", "without date",
+        "incomplete data", "unknown status", "no planned date",
+        // on time / successful
+        "on time", "completed on time", "met deadline", "ahead of schedule",
+        "finished early", "completed early", "within deadline",
+        // all / overview
+        "show studies", "list studies", "all studies", "find studies",
+        "show all", "how many", "study count", "total studies", "study status",
+        "study summary", "breakdown", "overview", "dashboard", "which studies",
+        "classification"
     ];
 
     public Task<PlanGeneratorResult> GenerateAsync(string query)
@@ -196,24 +222,41 @@ Read-only, deterministic, approved service contracts only.
 
     private static List<string> ResolveClassifications(string q)
     {
+        // Exact classification filter
         if (q.Contains("classification indeterminate")) return ["Indeterminate"];
         if (q.Contains("classification delayed"))       return ["Delayed"];
         if (q.Contains("classification on time"))       return ["On Time"];
 
-        if (q.Contains("show all studies") || q.Contains("list studies") ||
-            q.Contains("all studies") || q.Contains("how many") ||
-            q.Contains("study count") || q.Contains("total studies") ||
-            q.Contains("study summary") || q.Contains("study status") ||
-            (q.Contains("on time") && q.Contains("delayed") && q.Contains("indeterminate")))
-            return ["On Time", "Delayed", "Indeterminate"];
+        // Overview / all-studies queries
+        bool isOverview = q.Contains("all studies") || q.Contains("show all") ||
+                          q.Contains("list studies") || q.Contains("find studies") ||
+                          q.Contains("how many") || q.Contains("study count") ||
+                          q.Contains("total studies") || q.Contains("study status") ||
+                          q.Contains("study summary") || q.Contains("breakdown") ||
+                          q.Contains("overview") || q.Contains("dashboard") ||
+                          q.Contains("which studies");
+        if (isOverview) return ["On Time", "Delayed", "Indeterminate"];
 
-        // "not on time" / "not completed on time" means the user wants all non-on-time studies.
-        // Keep this separate so "on time" is not treated as a positive request in those phrases.
-        bool notOnTime = q.Contains("not on time") || q.Contains("not completed on time");
+        // "not on time" negation — must check before plain "on time"
+        bool notOnTime = q.Contains("not on time") || q.Contains("not completed on time") ||
+                         q.Contains("haven't finished") || q.Contains("not finished");
 
-        bool wantsOnTime        = q.Contains("on time") && !notOnTime;
-        bool wantsDelayed       = q.Contains("delayed") || q.Contains("completed late") || notOnTime;
-        bool wantsIndeterminate = q.Contains("indeterminate") || notOnTime;
+        bool wantsDelayed = q.Contains("delayed") || q.Contains("overdue") ||
+                            q.Contains("late") || q.Contains("past due") ||
+                            q.Contains("behind") || q.Contains("at risk") ||
+                            q.Contains("missed deadline") || q.Contains("exceeded deadline") ||
+                            q.Contains("need attention") || q.Contains("problematic") ||
+                            q.Contains("still open") || notOnTime;
+
+        bool wantsIndeterminate = q.Contains("indeterminate") || q.Contains("missing date") ||
+                                  q.Contains("no completion date") || q.Contains("without date") ||
+                                  q.Contains("unknown status") || q.Contains("incomplete data") ||
+                                  notOnTime;
+
+        bool wantsOnTime = (q.Contains("on time") || q.Contains("met deadline") ||
+                            q.Contains("ahead of schedule") || q.Contains("finished early") ||
+                            q.Contains("completed early") || q.Contains("within deadline"))
+                           && !notOnTime;
 
         var result = new List<string>(3);
         if (wantsOnTime)        result.Add("On Time");
