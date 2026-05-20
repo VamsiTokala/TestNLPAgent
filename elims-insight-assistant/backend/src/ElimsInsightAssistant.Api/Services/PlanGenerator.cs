@@ -75,42 +75,24 @@ CLASSIFICATION RULES:
 - "Delayed": actualCompletionDate > plannedCompletionDate (both dates present)
 - "Indeterminate": plannedCompletionDate is null OR actualCompletionDate is null
 
-SUPPORTED QUERY TYPES — set supported=true for ANY of these intents:
-1. DELAYED / PROBLEM studies (missed or at risk):
-   delayed, overdue, late, past due, behind schedule, running late, missed deadline,
-   not completed on time, not on time, exceeded deadline, at risk, need attention,
-   problematic, struggling, haven't finished, not finished, still open
+THIS SYSTEM answers questions about study completion timeliness. It can:
+- Classify studies as On Time, Delayed, or Indeterminate
+- Filter or show studies by any combination of those classifications
+- Count or summarise studies across classifications
 
-2. INDETERMINATE / MISSING DATA studies:
-   indeterminate, missing dates, unknown status, no completion date, without dates,
-   incomplete data, no planned date, no actual date, status unknown
+Set supported=true if the user's question can reasonably be answered using
+study completion data — regardless of how it is phrased. You are an AI; use
+your understanding of intent, not keyword matching.
 
-3. ON TIME / SUCCESSFUL studies:
-   on time, completed on time, met deadline, ahead of schedule, finished early,
-   completed early, within deadline, no issues, successful, good standing
+Set supported=false only when the query is clearly outside this domain
+(e.g. weather, HR, invoices, lab equipment unrelated to study completion).
 
-4. ALL / OVERVIEW queries (use all three classifications):
-   show all, list all, all studies, how many, count, total, summary, breakdown,
-   overview, dashboard, report, status of studies, study status, what studies,
-   which studies, give me studies, find studies
-
-WHEN IN DOUBT: if a query mentions "studies" at all (show, list, find, count, get,
-which, what, are there, how many), set supported=true and use the most appropriate
-classifications. Only set supported=false for queries clearly unrelated to studies
-(e.g. weather, invoices, employee HR records, equipment).
-
-SET output.includeClassifications to the MINIMUM set that answers the question:
-- Delayed/problem/at-risk/late/overdue/past due/not on time/behind/need attention
-    → ["Delayed", "Indeterminate"]
-- Only delayed / just delayed / exclusively delayed
-    → ["Delayed"]
-- Only indeterminate / just indeterminate / missing dates only
-    → ["Indeterminate"]
-- On time / completed on time / met deadline / finished early / successful
-    → ["On Time"]
-- All / overview / breakdown / count / total / summary / status / dashboard /
-  any combination of multiple classifications / unclear intent
-    → ["On Time", "Delayed", "Indeterminate"]
+SET output.includeClassifications to the smallest set that fully answers the intent:
+- Intent is "problems / not on time / at risk / delayed" → ["Delayed", "Indeterminate"]
+- Intent is specifically and only "delayed studies" → ["Delayed"]
+- Intent is specifically and only "indeterminate / missing data" → ["Indeterminate"]
+- Intent is "successful / on time / met deadline" → ["On Time"]
+- Intent is a broad overview, count, all studies, or unclear → ["On Time", "Delayed", "Indeterminate"]
 
 FOR EACH SELECTED OPERATION, provide a brief "reason" explaining why that service
 is needed to answer this specific query.
