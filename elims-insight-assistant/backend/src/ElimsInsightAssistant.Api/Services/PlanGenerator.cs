@@ -197,6 +197,10 @@ public class MockPlanGenerator(IServiceRegistry registry, ILogger<MockPlanGenera
         var intent            = DeriveIntent(q);
         var classifications   = ResolveClassifications(q);
 
+        if (!IsSupportedQuery(q, intent, classifications))
+            return Task.FromResult(new PlanGeneratorResult(string.Empty, null,
+                "Query not supported by this assistant."));
+
         // Build a short, query-derived markdown summary
         var contractNames = string.Join(" + ", selectedContracts.Select(c => c.DisplayName));
         var markdown = $"Fetching data from {contractNames} to answer: {query}.";
@@ -222,6 +226,17 @@ public class MockPlanGenerator(IServiceRegistry registry, ILogger<MockPlanGenera
             string.Join(", ", classifications));
 
         return Task.FromResult(new PlanGeneratorResult(markdown, plan, null));
+    }
+
+    private static bool IsSupportedQuery(string q, string intent, List<string> classifications)
+    {
+        if (intent == "query_records")
+            return false;
+
+        if (q.Contains("filter") && classifications.Count == 0)
+            return false;
+
+        return true;
     }
 
     // Select which registered contracts are relevant based on keywords in the query.
@@ -327,9 +342,17 @@ public class GeminiPlanGenerator(IConfiguration config, IServiceRegistry registr
         var contracts = registry.GetAll();
         var coreInstructions = PromptBuilder.CoreInstructions(contracts);
         var responseShape = PromptBuilder.ResponseShape(contracts);
+        var asOfDate = DateTime.UtcNow.ToString("yyyy-MM-dd");
 
         return $$"""
 You are a governed analytics plan generator over the registered service contracts below.
+
+    REFERENCE DATE
+    Treat relative date phrases using UTC date {{asOfDate}}.
+    - "today" means {{asOfDate}}
+    - "this year" means the calendar year containing {{asOfDate}}
+    - "this month" means the calendar month containing {{asOfDate}}
+    - "last year" and "last month" are relative to {{asOfDate}}
 
 {{coreInstructions}}
 
@@ -345,7 +368,7 @@ User query: {{query}}
 
     public async Task<PlanGeneratorResult> GenerateAsync(string query)
     {
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
         try
         {
             var prompt = BuildPrompt(query);
@@ -594,7 +617,8 @@ public class OpenRouterPlanGenerator(IConfiguration config, IServiceRegistry reg
     public async Task<PlanGeneratorResult> GenerateAsync(string query)
     {
         const int maxAttempts = 3;
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+        var attemptTimeout = TimeSpan.FromSeconds(75);
+        var retryDelay = TimeSpan.FromMinutes(1);
 
         var contracts = registry.GetAll();
         var systemPrompt =
@@ -617,6 +641,8 @@ public class OpenRouterPlanGenerator(IConfiguration config, IServiceRegistry reg
                 if (attempt > 1)
                     logger.LogWarning("OpenRouter → retry attempt {Attempt}/{Max} for query: {Query}", attempt, maxAttempts, query);
 
+                using var cts = new CancellationTokenSource(attemptTimeout);
+
                 var completion = await _client.CompleteChatAsync(
                     [new SystemChatMessage(systemPrompt), new UserChatMessage(query)],
                     new ChatCompletionOptions
@@ -629,7 +655,11 @@ public class OpenRouterPlanGenerator(IConfiguration config, IServiceRegistry reg
                 if (completion.Value.Content.Count == 0 || string.IsNullOrWhiteSpace(completion.Value.Content[0].Text))
                 {
                     logger.LogWarning("OpenRouter returned an empty response body (attempt {Attempt}).", attempt);
-                    if (attempt < maxAttempts) continue;
+                    if (attempt < maxAttempts)
+                    {
+                        await DelayBeforeRetryAsync(attempt, maxAttempts, retryDelay);
+                        continue;
+                    }
                     return new PlanGeneratorResult(string.Empty, null,
                         "AI provider returned an empty response — the model may be rate-limited. Try again or switch to Mock.", IsServerError: true);
                 }
@@ -642,7 +672,11 @@ public class OpenRouterPlanGenerator(IConfiguration config, IServiceRegistry reg
                 if (startIdx < 0 || endIdx <= startIdx)
                 {
                     logger.LogWarning("OpenRouter response contained no JSON object (attempt {Attempt}). Raw: {Raw}", attempt, raw);
-                    if (attempt < maxAttempts) continue;
+                    if (attempt < maxAttempts)
+                    {
+                        await DelayBeforeRetryAsync(attempt, maxAttempts, retryDelay);
+                        continue;
+                    }
                     return new PlanGeneratorResult(string.Empty, null,
                         "Plan generation service returned an unreadable response.", IsServerError: true);
                 }
@@ -653,7 +687,11 @@ public class OpenRouterPlanGenerator(IConfiguration config, IServiceRegistry reg
                 catch (JsonException ex)
                 {
                     logger.LogWarning(ex, "OpenRouter JSON parse failed (attempt {Attempt}). Raw: {Json}", attempt, json);
-                    if (attempt < maxAttempts) continue;
+                    if (attempt < maxAttempts)
+                    {
+                        await DelayBeforeRetryAsync(attempt, maxAttempts, retryDelay);
+                        continue;
+                    }
                     return new PlanGeneratorResult(string.Empty, null,
                         "Plan generation service returned an unreadable response.", IsServerError: true);
                 }
@@ -677,7 +715,11 @@ public class OpenRouterPlanGenerator(IConfiguration config, IServiceRegistry reg
                     if (plan is null)
                     {
                         logger.LogWarning("OpenRouter plan deserialised to null (attempt {Attempt}). Raw: {Json}", attempt, json);
-                        if (attempt < maxAttempts) continue;
+                        if (attempt < maxAttempts)
+                        {
+                            await DelayBeforeRetryAsync(attempt, maxAttempts, retryDelay);
+                            continue;
+                        }
                         return new PlanGeneratorResult(string.Empty, null,
                             "Plan generation service returned an unexpected response.", IsServerError: true);
                     }
@@ -685,7 +727,11 @@ public class OpenRouterPlanGenerator(IConfiguration config, IServiceRegistry reg
                     if (string.IsNullOrWhiteSpace(plan.Intent) || plan.Operations.Count == 0)
                     {
                         logger.LogWarning("OpenRouter returned incomplete plan (attempt {Attempt}). Raw: {Json}", attempt, json);
-                        if (attempt < maxAttempts) continue;
+                        if (attempt < maxAttempts)
+                        {
+                            await DelayBeforeRetryAsync(attempt, maxAttempts, retryDelay);
+                            continue;
+                        }
                         return new PlanGeneratorResult(string.Empty, null, "Query not supported by this assistant.");
                     }
 
@@ -699,14 +745,43 @@ public class OpenRouterPlanGenerator(IConfiguration config, IServiceRegistry reg
             }
             catch (OperationCanceledException)
             {
-                logger.LogWarning("OpenRouter call timed out after 45s for query: {Query}", query);
+                logger.LogWarning(
+                    "OpenRouter call timed out after {TimeoutSeconds}s (attempt {Attempt}/{Max}) for query: {Query}",
+                    attemptTimeout.TotalSeconds, attempt, maxAttempts, query);
+                if (attempt < maxAttempts)
+                {
+                    await DelayBeforeRetryAsync(attempt, maxAttempts, retryDelay);
+                    continue;
+                }
                 return new PlanGeneratorResult(string.Empty, null,
-                    "Plan generation timed out — please try again.", IsServerError: true);
+                    "Plan generation timed out — free-tier models can be slow. Please try again or switch to Mock.", IsServerError: true);
+            }
+            catch (System.ClientModel.ClientResultException ex) when (ex.Status == 401 || ex.Status == 403)
+            {
+                logger.LogError(ex, "OpenRouter authentication failed for query: {Query}", query);
+                return new PlanGeneratorResult(string.Empty, null,
+                    "OpenRouter authentication failed. Check OpenRouter:ApiKey and account access.", IsServerError: true);
+            }
+            catch (System.ClientModel.ClientResultException ex) when (ex.Status == 429)
+            {
+                logger.LogWarning(ex, "OpenRouter rate limited for query: {Query}", query);
+                return new PlanGeneratorResult(string.Empty, null,
+                    "OpenRouter rate limit reached or account has no available credits/quota. Try later, switch model, or use Gemini.", IsServerError: true);
+            }
+            catch (System.ClientModel.ClientResultException ex) when (ex.Status == 503)
+            {
+                logger.LogWarning(ex, "OpenRouter provider unavailable for model {Model} and query: {Query}", _model, query);
+                return new PlanGeneratorResult(string.Empty, null,
+                    $"OpenRouter model '{_model}' is currently unavailable. Try again later, switch model, or use Gemini.", IsServerError: true);
             }
             catch (Exception ex)
             {
                 logger.LogError(ex, "OpenRouter call failed (attempt {Attempt}) for query: {Query}", attempt, query);
-                if (attempt < maxAttempts) continue;
+                if (attempt < maxAttempts)
+                {
+                    await DelayBeforeRetryAsync(attempt, maxAttempts, retryDelay);
+                    continue;
+                }
                 return new PlanGeneratorResult(string.Empty, null,
                     "Plan generation service is temporarily unavailable.", IsServerError: true);
             }
@@ -714,5 +789,13 @@ public class OpenRouterPlanGenerator(IConfiguration config, IServiceRegistry reg
 
         return new PlanGeneratorResult(string.Empty, null,
             "Plan generation service is temporarily unavailable.", IsServerError: true);
+    }
+
+    private async Task DelayBeforeRetryAsync(int attempt, int maxAttempts, TimeSpan retryDelay)
+    {
+        logger.LogWarning(
+            "OpenRouter waiting {DelaySeconds}s before retry ({NextAttempt}/{Max}).",
+            retryDelay.TotalSeconds, attempt + 1, maxAttempts);
+        await Task.Delay(retryDelay);
     }
 }

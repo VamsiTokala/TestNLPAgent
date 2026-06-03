@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using ElimsInsightAssistant.Api.Models;
 using ElimsInsightAssistant.Api.Services;
 
@@ -41,6 +42,8 @@ public class ExecutionEngine : IExecutionEngine
     {
         if (userContext.Roles.Count == 0)
             throw new UnauthorizedAccessException("User has no assigned roles.");
+
+        var correlate = plan.Correlate ?? new PlanCorrelate();
 
         // ── Fetch & filter every contract referenced in the plan ──────────────
         var rawByService = new Dictionary<string, List<object>>(StringComparer.OrdinalIgnoreCase);
@@ -96,8 +99,8 @@ public class ExecutionEngine : IExecutionEngine
                 var leftRows  = rawByService[leftService];
                 var rightRows = rawByService[rightService];
 
-                var leftIdField  = !string.IsNullOrEmpty(plan.Correlate.LeftField)  ? plan.Correlate.LeftField  : "studyId";
-                var rightIdField = !string.IsNullOrEmpty(plan.Correlate.RightField) ? plan.Correlate.RightField : leftIdField;
+                var leftIdField  = !string.IsNullOrEmpty(correlate.LeftField)  ? correlate.LeftField  : "studyId";
+                var rightIdField = !string.IsNullOrEmpty(correlate.RightField) ? correlate.RightField : leftIdField;
 
                 var completionByKey = rightRows
                     .GroupBy(r => GetStringField(r, rightIdField))
@@ -172,8 +175,8 @@ public class ExecutionEngine : IExecutionEngine
 
             if (primaryService != null && rawByService.TryGetValue(primaryService, out var primaryRows))
             {
-                var joinField = !string.IsNullOrEmpty(plan.Correlate.LeftField)  ? plan.Correlate.LeftField
-                               : !string.IsNullOrEmpty(plan.Correlate.RightField) ? plan.Correlate.RightField
+                var joinField = !string.IsNullOrEmpty(correlate.LeftField)  ? correlate.LeftField
+                               : !string.IsNullOrEmpty(correlate.RightField) ? correlate.RightField
                                : "studyId";
 
                 var primaryHasJoinField = primaryRows.Count > 0
@@ -306,10 +309,74 @@ public class ExecutionEngine : IExecutionEngine
         {
             "="           => string.Equals(fieldVal, filterVal, StringComparison.OrdinalIgnoreCase),
             "!="          => !string.Equals(fieldVal, filterVal, StringComparison.OrdinalIgnoreCase),
+            ">"           => CompareValues(fieldVal, filterVal) > 0,
+            ">="          => CompareValues(fieldVal, filterVal) >= 0,
+            "<"           => CompareValues(fieldVal, filterVal) < 0,
+            "<="          => CompareValues(fieldVal, filterVal) <= 0,
+            "in"          => ParseFilterValues(filterVal).Any(v => string.Equals(fieldVal, v, StringComparison.OrdinalIgnoreCase)),
+            "between"     => MatchesBetween(fieldVal, filterVal),
             "is null"     => fieldVal is null or "",
             "is not null" => fieldVal is not null and not "",
             _             => true
         };
+
+    private static bool MatchesBetween(string? fieldVal, string? filterVal)
+    {
+        if (string.IsNullOrWhiteSpace(fieldVal)) return false;
+        var values = ParseFilterValues(filterVal).ToList();
+        if (values.Count < 2) return true;
+        return CompareValues(fieldVal, values[0]) >= 0 && CompareValues(fieldVal, values[1]) <= 0;
+    }
+
+    private static IEnumerable<string> ParseFilterValues(string? filterVal)
+    {
+        if (string.IsNullOrWhiteSpace(filterVal))
+            return [];
+
+        if (!LooksLikeJson(filterVal))
+            return [filterVal];
+
+        try
+        {
+            using var doc = JsonDocument.Parse(filterVal);
+            var root = doc.RootElement;
+            if (root.ValueKind == JsonValueKind.Array)
+            {
+                return [..
+                    root.EnumerateArray()
+                        .Select(item => item.ValueKind == JsonValueKind.String ? item.GetString() ?? string.Empty : item.GetRawText())];
+            }
+
+            return [root.ValueKind == JsonValueKind.String ? root.GetString() ?? string.Empty : root.GetRawText()];
+        }
+        catch (JsonException)
+        {
+            return [filterVal];
+        }
+    }
+
+    private static int CompareValues(string? fieldVal, string? filterVal)
+    {
+        if (string.IsNullOrWhiteSpace(fieldVal) && string.IsNullOrWhiteSpace(filterVal)) return 0;
+        if (string.IsNullOrWhiteSpace(fieldVal)) return -1;
+        if (string.IsNullOrWhiteSpace(filterVal)) return 1;
+
+        var normalizedFilter = ParseFilterValues(filterVal).FirstOrDefault() ?? filterVal;
+
+        if (DateTime.TryParse(fieldVal, out var fieldDate) && DateTime.TryParse(normalizedFilter, out var filterDate))
+            return fieldDate.CompareTo(filterDate);
+
+        if (decimal.TryParse(fieldVal, out var fieldNumber) && decimal.TryParse(normalizedFilter, out var filterNumber))
+            return fieldNumber.CompareTo(filterNumber);
+
+        return string.Compare(fieldVal, normalizedFilter, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool LooksLikeJson(string value)
+    {
+        var trimmed = value.Trim();
+        return trimmed.StartsWith("[") || trimmed.StartsWith("{") || trimmed.StartsWith("\"");
+    }
 
     // ── Reflection helpers ────────────────────────────────────────────────────
 

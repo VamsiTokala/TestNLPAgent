@@ -14,9 +14,40 @@ internal static class SeedLoader
 
     public static async Task<List<T>> LoadAsync<T>(IWebHostEnvironment env, string filename)
     {
-        var file = Path.Combine(env.ContentRootPath, "..", "..", "..", "seed-data", filename);
-        var json = await File.ReadAllTextAsync(Path.GetFullPath(file));
+        var seedDataDir = ResolveSeedDataDirectory(env.ContentRootPath)
+            ?? throw new DirectoryNotFoundException(
+                $"Could not locate seed-data directory from content root '{env.ContentRootPath}'.");
+
+        var file = Path.Combine(seedDataDir, filename);
+        var json = await File.ReadAllTextAsync(file);
         return JsonSerializer.Deserialize<List<T>>(json, Options) ?? [];
+    }
+
+    private static string? ResolveSeedDataDirectory(string contentRootPath)
+    {
+        foreach (var start in CandidateRoots(contentRootPath))
+        {
+            var dir = new DirectoryInfo(start);
+            while (dir is not null)
+            {
+                var candidate = Path.Combine(dir.FullName, "seed-data");
+                if (Directory.Exists(candidate))
+                    return candidate;
+
+                dir = dir.Parent;
+            }
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<string> CandidateRoots(string contentRootPath)
+    {
+        yield return contentRootPath;
+
+        var baseDir = AppContext.BaseDirectory;
+        if (!string.Equals(baseDir, contentRootPath, StringComparison.OrdinalIgnoreCase))
+            yield return baseDir;
     }
 }
 

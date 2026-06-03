@@ -38,6 +38,38 @@ internal sealed class FlexibleStringListConverter : JsonConverter<List<string>>
     }
 }
 
+internal sealed class FlexibleStringValueConverter : JsonConverter<string?>
+{
+    public override string? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        return reader.TokenType switch
+        {
+            JsonTokenType.Null => null,
+            JsonTokenType.String => reader.GetString(),
+            _ => JsonDocument.ParseValue(ref reader).RootElement.GetRawText()
+        };
+    }
+
+    public override void Write(Utf8JsonWriter writer, string? value, JsonSerializerOptions options)
+    {
+        if (value is null)
+        {
+            writer.WriteNullValue();
+            return;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(value);
+            doc.RootElement.WriteTo(writer);
+        }
+        catch (JsonException)
+        {
+            writer.WriteStringValue(value);
+        }
+    }
+}
+
 public record NaturalLanguageQueryRequest(string Query, UserContext UserContext, string? Provider = null);
 public record UserContext(string UserId, List<string> Roles, List<string> LegalEntities);
 
@@ -84,7 +116,7 @@ public record ExecutionPlan
 }
 
 public record PlanOperation(string Service, string Action, List<string> Select, List<PlanFilter> Filters, string? Reason = null);
-public record PlanFilter(string Field, string Op, string? Value);
+public record PlanFilter(string Field, string Op, [property: JsonConverter(typeof(FlexibleStringValueConverter))] string? Value);
 public record PlanCorrelate(string LeftEntity = "", string RightEntity = "", string LeftField = "", string RightField = "");
 public record PlanTransform(List<string>? GroupBy = null, List<PlanAggregate>? Aggregates = null)
 {

@@ -6,6 +6,12 @@ import { InsightAssistantApiService, ProviderInfo } from './services/insight-ass
 import { AssistantQueryResponse } from './models/assistant-query-response.model';
 import { ServiceContractEntry } from './models/service-contract.model';
 
+const DEFAULT_PROVIDERS: ProviderInfo[] = [
+  { id: 'mock', name: 'Mock (keyword matching)', available: true },
+  { id: 'gemini', name: 'Gemini 2.5 Flash', available: false },
+  { id: 'openrouter', name: 'OpenRouter', available: false }
+];
+
 @Component({
   standalone: true,
   selector: 'app-insight-assistant',
@@ -28,8 +34,8 @@ export class InsightAssistantComponent implements OnInit {
   slowWarning = false;
   form: FormGroup;
 
-  providers: ProviderInfo[] = [];
-  selectedProvider: string | null = null;
+  providers: ProviderInfo[] = [...DEFAULT_PROVIDERS];
+  selectedProvider: string | null = 'mock';
 
   contracts: ServiceContractEntry[] = [];
   showAddForm = false;
@@ -116,7 +122,14 @@ export class InsightAssistantComponent implements OnInit {
   ngOnInit(): void {
     this.api.getContracts().subscribe({ next: c => this.zone.run(() => this.contracts = c) });
     this.api.getProviders().subscribe({
-      next: p => this.zone.run(() => { this.providers = p; this.selectedProvider = p[0]?.id ?? null; })
+      next: p => this.zone.run(() => {
+        this.providers = p?.length ? p : [...DEFAULT_PROVIDERS];
+        this.selectedProvider = this.providers.find(x => x.available)?.id ?? this.providers[0]?.id ?? 'mock';
+      }),
+      error: () => this.zone.run(() => {
+        this.providers = [...DEFAULT_PROVIDERS];
+        this.selectedProvider = 'mock';
+      })
     });
   }
 
@@ -129,7 +142,7 @@ export class InsightAssistantComponent implements OnInit {
     this._slowTimer = setTimeout(() => this.zone.run(() => { if (this.isLoading) this.slowWarning = true; }), 5000);
 
     this.api.query(this.form.value.query || '', this.selectedProvider ?? undefined)
-      .pipe(timeout(55000))
+      .pipe(timeout(250000))
       .subscribe({
         next: (r: AssistantQueryResponse) => {
           this.zone.run(() => {
@@ -143,7 +156,7 @@ export class InsightAssistantComponent implements OnInit {
             this._clearSlow();
             this.isLoading = false;
             if (err instanceof TimeoutError) {
-              this.error = 'Request timed out after 55 s. Free-tier providers can be slow — try again or switch to Mock.';
+              this.error = 'Request timed out after 250 s. Free-tier providers can be slow — try again or switch to Mock.';
             } else if (err?.status === 503) {
               this.error = err?.error?.message ?? 'AI provider temporarily unavailable — try again or switch to Mock.';
             } else if (err?.status === 400) {

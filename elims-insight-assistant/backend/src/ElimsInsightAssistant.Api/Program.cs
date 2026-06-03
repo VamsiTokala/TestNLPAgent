@@ -5,6 +5,10 @@ using ElimsInsightAssistant.Api.Validation;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Local demo runs often start in Production; explicitly load user-secrets so
+// provider keys are still available without forcing ASPNETCORE_ENVIRONMENT.
+builder.Configuration.AddUserSecrets<Program>(optional: true);
+
 builder.Services.AddControllers();
 builder.Services.AddSingleton<IServiceRegistry, InMemoryServiceRegistry>();
 builder.Services.AddEndpointsApiExplorer();
