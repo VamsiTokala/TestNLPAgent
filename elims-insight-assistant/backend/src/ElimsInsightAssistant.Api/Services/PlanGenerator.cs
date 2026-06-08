@@ -82,10 +82,17 @@ SUPPORTED = TRUE for any query that can be answered using the registered contrac
 SUPPORTED = FALSE only when the query asks about something no registered contract
 covers (weather, invoices, HR records, unrelated equipment, recipes, etc.).
 
-CLASSIFICATION RULES (use ONLY when the query is about completion timeliness):
-- "On Time":        actualCompletionDate <= plannedCompletionDate (both present)
-- "Delayed":        actualCompletionDate >  plannedCompletionDate (both present)
-- "Indeterminate":  plannedCompletionDate is null OR actualCompletionDate is null
+CLASSIFICATION RULES (apply when the query is about completion timeliness)
+IMPORTANT: actualCompletionDate is NOT a raw contract field — it is computed by the
+execution engine as max(completedAt) from the completion-record contract, grouped by
+the join key. You will NEVER find "actualCompletionDate" in any contract schema; that
+is expected and correct. Do NOT declare a timeliness query unsupported because the
+field is absent — include the completion-record contract and the engine derives it.
+
+- "On Time":        engine actualCompletionDate <= plannedCompletionDate (both present)
+- "Delayed":        engine actualCompletionDate >  plannedCompletionDate (both present)
+- "Indeterminate":  plannedCompletionDate is null OR completion-record contract has no
+                    matching rows for the record
 
 BUILDING THE PLAN
 1. Identify which contracts provide the data needed. Include ALL contracts required
@@ -94,6 +101,9 @@ BUILDING THE PLAN
    — derive it from the query, do NOT use a fixed template.
 3. For joins, populate correlate with leftEntity, rightEntity, leftField, rightField
    identifying the shared key between the two contracts.
+   For timeliness queries: the left contract must have plannedCompletionDate; the right
+   contract must have a date field (e.g. completedAt) that the engine aggregates into
+   actualCompletionDate. Both contracts must appear in operations.
 4. Set output.includeClassifications:
    - delayed / late / overdue / not-on-time / behind  → ["Delayed", "Indeterminate"]
    - only delayed                                      → ["Delayed"]
