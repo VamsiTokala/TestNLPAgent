@@ -29,5 +29,6 @@ export interface AssistantQueryResponse {
   summary: QuerySummary;
   results: StudyCompletionResult[];
   datasets: { [serviceName: string]: Array<{ [field: string]: unknown }> };
+  nextPageToken?: string | null;
   message: string;
 }

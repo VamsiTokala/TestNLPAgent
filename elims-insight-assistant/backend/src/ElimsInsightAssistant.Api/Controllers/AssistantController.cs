@@ -91,7 +91,7 @@ public class AssistantController(
         var traceId = $"TRACE-{Guid.NewGuid():N}";
         var planId  = $"PLAN-{Guid.NewGuid():N}";
         var started = DateTime.UtcNow;
-        var execution = await executionEngine.ExecuteAsync(result.Plan, request.UserContext);
+        var execution = await executionEngine.ExecuteAsync(result.Plan, request.UserContext, ParseOffset(request.PageToken));
         var finished = DateTime.UtcNow;
 
         logger.LogInformation(
@@ -113,7 +113,8 @@ public class AssistantController(
             Validation        = validation,
             Summary           = execution.Summary,
             Results           = execution.Rows,
-            Datasets          = execution.Datasets
+            Datasets          = execution.Datasets,
+            NextPageToken     = execution.NextPageToken
         };
 
         auditService.Save(new AuditRecord
@@ -157,8 +158,8 @@ public class AssistantController(
     {
         var validation = validator.Validate(request.Plan);
         if (validation.Status != "Passed") return BadRequest(validation);
-        var execution = await executionEngine.ExecuteAsync(request.Plan, request.UserContext);
-        return Ok(new { summary = execution.Summary, results = execution.Rows, datasets = execution.Datasets, validation });
+        var execution = await executionEngine.ExecuteAsync(request.Plan, request.UserContext, ParseOffset(request.PageToken));
+        return Ok(new { summary = execution.Summary, results = execution.Rows, datasets = execution.Datasets, nextPageToken = execution.NextPageToken, validation });
     }
 
     [HttpGet("audit/{traceId}")]
@@ -176,6 +177,11 @@ public class AssistantController(
             "mock"       => serviceProvider.GetRequiredService<MockPlanGenerator>(),
             _            => defaultGenerator
         };
+
+    // PageToken is the offset to resume from — an opaque string to callers,
+    // a plain integer in practice (see ExecutionEngine.Paginate).
+    private static int ParseOffset(string? pageToken) =>
+        int.TryParse(pageToken, out var offset) ? offset : 0;
 }
 
-public record ExecuteRequest(ExecutionPlan Plan, UserContext UserContext);
+public record ExecuteRequest(ExecutionPlan Plan, UserContext UserContext, string? PageToken = null);
