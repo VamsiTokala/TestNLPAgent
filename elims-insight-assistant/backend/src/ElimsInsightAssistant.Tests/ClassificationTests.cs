@@ -9,7 +9,7 @@ namespace ElimsInsightAssistant.Tests;
 public class ClassificationTests
 {
     private static StudyDto Study(DateTime? planned) =>
-        new("S1", "ST-001", "Acme", "EU", planned);
+        new("S1", "ST-001", "Acme", "DS-BIOANALYTICS", planned);
 
     private static string Class(Dictionary<string, object?> row) =>
         row["classification"]?.ToString() ?? "";

@@ -1,31 +1,29 @@
 [
-  {"testpId":"T1",  "studyId":"S1",  "status":"Completed", "completedAt":"2026-04-08T10:30:00Z", "runType":"Production", "result":"Pass"},
-  {"testpId":"T2",  "studyId":"S1",  "status":"Completed", "completedAt":"2026-04-09T15:00:00Z", "runType":"Production", "result":"Pass"},
-  {"testpId":"T3",  "studyId":"S2",  "status":"Completed", "completedAt":"2026-04-16T11:00:00Z", "runType":"Production", "result":"Pass"},
-  {"testpId":"T4",  "studyId":"S2",  "status":"Completed", "completedAt":"2026-04-17T09:30:00Z", "runType":"Production", "result":"Fail"},
-  {"testpId":"T5",  "studyId":"S3",  "status":"Completed", "completedAt":"2026-04-18T14:00:00Z", "runType":"Production", "result":"Pass"},
-  {"testpId":"T6",  "studyId":"S4",  "status":"Pending",   "completedAt":null,                   "runType":"Production", "result":null},
+  {"testpId":"T-BIO-001","studyId":"S-BIO-001","status":"Completed","completedAt":"2026-04-08T10:30:00Z","runType":"Production","result":"Pass","qcStatus":"Passed","instrument":"LCMS-01"},
+  {"testpId":"T-BIO-002","studyId":"S-BIO-001","status":"Completed","completedAt":"2026-04-09T15:00:00Z","runType":"Production","result":"Pass","qcStatus":"Passed","instrument":"LCMS-01"},
 
-  {"testpId":"T7",  "studyId":"S5",  "status":"Completed", "completedAt":"2026-04-02T09:00:00Z", "runType":"Production", "result":"Pass"},
-  {"testpId":"T8",  "studyId":"S5",  "status":"Completed", "completedAt":"2026-04-04T16:30:00Z", "runType":"Repeat",     "result":"Pass"},
+  {"testpId":"T-BIO-003","studyId":"S-BIO-002","status":"Completed","completedAt":"2026-04-14T11:00:00Z","runType":"Production","result":"Pass","qcStatus":"Passed","instrument":"LCMS-01"},
+  {"testpId":"T-BIO-004","studyId":"S-BIO-002","status":"Pending","completedAt":null,"runType":"Production","result":null,"qcStatus":null,"instrument":"LCMS-02"},
 
-  {"testpId":"T9",  "studyId":"S6",  "status":"Completed", "completedAt":"2026-04-07T08:00:00Z", "runType":"Production", "result":"Pass"},
-  {"testpId":"T10", "studyId":"S6",  "status":"Completed", "completedAt":"2026-04-10T12:00:00Z", "runType":"Repeat",     "result":"Pass"},
+  {"testpId":"T-BIO-005","studyId":"S-BIO-003","status":"Completed","completedAt":"2026-04-11T09:30:00Z","runType":"Production","result":"Fail","qcStatus":"Failed","instrument":"LCMS-02","failureReason":"Carryover contamination"},
+  {"testpId":"T-BIO-006","studyId":"S-BIO-003","status":"Completed","completedAt":"2026-04-17T13:00:00Z","runType":"Repeat","result":"Pass","qcStatus":"Passed","instrument":"LCMS-02"},
 
-  {"testpId":"T11", "studyId":"S7",  "status":"Completed", "completedAt":"2026-04-22T10:00:00Z", "runType":"Production", "result":"Pass"},
-  {"testpId":"T12", "studyId":"S7",  "status":"Completed", "completedAt":"2026-04-28T17:00:00Z", "runType":"Repeat",     "result":"Fail"},
+  {"testpId":"T-BIO-007","studyId":"S-BIO-004","status":"Pending","completedAt":null,"runType":"Production","result":null,"qcStatus":null,"instrument":"LCMS-01"},
 
-  {"testpId":"T13", "studyId":"S8",  "status":"Completed", "completedAt":"2026-04-14T11:30:00Z", "runType":"Production", "result":"Pass"},
-  {"testpId":"T14", "studyId":"S8",  "status":"Pending",   "completedAt":null,                   "runType":"Repeat",     "result":null},
+  {"testpId":"T-BIO-008","studyId":"S-BIO-005","status":"Completed","completedAt":"2026-04-02T09:00:00Z","runType":"Production","result":"Pass","qcStatus":"Passed","instrument":"LCMS-01"},
+  {"testpId":"T-BIO-009","studyId":"S-BIO-005","status":"Completed","completedAt":"2026-04-11T16:30:00Z","runType":"Repeat","result":"Pass","qcStatus":"Passed","instrument":"LCMS-01"},
 
-  {"testpId":"T15", "studyId":"S9",  "status":"Completed", "completedAt":"2026-04-29T09:00:00Z", "runType":"Production", "result":"Pass"},
-  {"testpId":"T16", "studyId":"S9",  "status":"Completed", "completedAt":"2026-04-30T14:00:00Z", "runType":"Production", "result":"Pass"},
+  {"testpId":"T-BIO-010","studyId":"S-BIO-006","status":"In Progress","completedAt":null,"runType":"Production","result":null,"qcStatus":null,"instrument":"LCMS-02"},
 
-  {"testpId":"T17", "studyId":"S10", "status":"Completed", "completedAt":"2026-04-20T10:00:00Z", "runType":"Production", "result":"Pass"},
-  {"testpId":"T18", "studyId":"S10", "status":"Completed", "completedAt":"2026-04-22T15:00:00Z", "runType":"Repeat",     "result":"Pass"},
+  {"testpId":"T-BIO-011","studyId":"S-BIO-007","status":"Pending","completedAt":null,"runType":"Production","result":null,"qcStatus":null,"instrument":"LCMS-02"},
 
-  {"testpId":"T19", "studyId":"S11", "status":"Completed", "completedAt":"2026-04-11T09:00:00Z", "runType":"Production", "result":"Fail"},
-  {"testpId":"T20", "studyId":"S11", "status":"Completed", "completedAt":"2026-04-15T11:00:00Z", "runType":"Repeat",     "result":"Pass"},
+  {"testpId":"T-DMPK-001","studyId":"S-DMPK-001","status":"Completed","completedAt":"2026-04-04T08:00:00Z","runType":"Production","result":"Pass","qcStatus":"Passed","instrument":"HTRF-Reader-01"},
+  {"testpId":"T-DMPK-002","studyId":"S-DMPK-002","status":"Completed","completedAt":"2026-04-19T12:00:00Z","runType":"Production","result":"Pass","qcStatus":"Passed","instrument":"HTRF-Reader-01"},
+  {"testpId":"T-DMPK-003","studyId":"S-DMPK-003","status":"Completed","completedAt":"2026-04-01T10:00:00Z","runType":"Production","result":"Fail","qcStatus":"Failed","instrument":"HTRF-Reader-01","failureReason":"Instrument calibration drift"},
+  {"testpId":"T-DMPK-004","studyId":"S-DMPK-004","status":"In Progress","completedAt":null,"runType":"Production","result":null,"qcStatus":null,"instrument":"HTRF-Reader-01"},
 
-  {"testpId":"T21", "studyId":"S12", "status":"Pending",   "completedAt":null,                   "runType":"Production", "result":null}
+  {"testpId":"T-VITRO-001","studyId":"S-VITRO-001","status":"Completed","completedAt":"2026-04-17T10:00:00Z","runType":"Production","result":"Pass","qcStatus":"Passed","instrument":"HTRF-Reader-01"},
+  {"testpId":"T-VITRO-002","studyId":"S-VITRO-002","status":"Pending","completedAt":null,"runType":"Production","result":null,"qcStatus":null,"instrument":"HTRF-Reader-01"},
+  {"testpId":"T-VITRO-003","studyId":"S-VITRO-006","status":"Completed","completedAt":"2026-04-07T09:00:00Z","runType":"Production","result":"Pass","qcStatus":"Passed","instrument":"HTRF-Reader-01"},
+  {"testpId":"T-VITRO-004","studyId":"S-VITRO-008","status":"Completed","completedAt":"2026-04-24T15:00:00Z","runType":"Production","result":"Pass","qcStatus":"Passed","instrument":"HTRF-Reader-01"}
 ]
