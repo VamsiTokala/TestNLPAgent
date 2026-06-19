@@ -89,12 +89,18 @@ internal static class PromptBuilder
 {{ExampleOperations(contracts)}}
     ],
     "correlate": { "leftEntity": "", "rightEntity": "", "leftField": "", "rightField": "" },
+    "transform": { "groupBy": [], "aggregates": [] },
     "output": { "includeClassifications": ["On Time", "Delayed", "Indeterminate"] },
+    "sort": [],
     "limits": { "maxRows": 500, "pagination": false }
   }
 }
 Field rules: each operation MUST use keys "service", "action", "select", "filters", "reason".
 Do NOT rename them to "entity", "type", "function", or "condition". "service" MUST be one of the contract names listed above.
+"transform.groupBy" is a list of bare field names to group rows by. "transform.aggregates" is a list of
+{ "field": "<field-name-or-'*'>", "fn": "count|sum|avg|min|max", "as": "<output-column-name>" }. Leave both
+empty ([]) for a plain list/filter query with no grouping or totals.
+"sort" is a list of { "field": "<field-name>", "direction": "asc|desc" }. Leave it empty ([]) unless the query asks for ordering.
 "Allowed values for <field> (exhaustive)" lines are a strict whitelist — only those literal values may be used as filter values for that field.
 "Example values for <field> (samples only — not exhaustive)" lines show the SHAPE of identifier values — user identifiers that match the shape MUST be accepted even if the exact value is not in the sample list. Never declare an identifier 'unsupported' just because it isn't in the sample list.
 """;
@@ -103,9 +109,9 @@ Do NOT rename them to "entity", "type", "function", or "condition". "service" MU
     internal static string CoreInstructions(IReadOnlyList<ServiceContractEntry> contracts)
     {
         var servicesBlock = ServicesBlock(contracts);
-        return $"""
+        return $$"""
 REGISTERED SERVICE CONTRACTS — these are the ONLY data sources available:
-{servicesBlock}
+{{servicesBlock}}
 
 ALLOWED FILTER OPERATORS: =, !=, >, >=, <, <=, in, between, is null, is not null
 ALLOWED AGGREGATE FUNCTIONS: max, min, count, sum, avg
@@ -162,7 +168,26 @@ BUILDING THE PLAN
    - If the identifier belongs to a different contract than the primaryEntity,
      include that contract too and correlate the two on their shared key
      (e.g. studyId).
-7. Fill "reason" on each operation explaining why that contract is needed.
+   - "between" ALWAYS needs exactly two bounds, encoded as a JSON array string:
+     "[\"<low>\", \"<high>\"]". For a month/year phrase like "April 2026", use the
+     first and last calendar day of that month as the two bounds. NEVER emit a
+     "between" filter with only one bound — use ">=" or "<=" alone instead.
+7. Use transform when the query asks for a total/count/breakdown rather than raw rows:
+   - "how many distinct X" / "total number of X (a category)" / "X we support" →
+     transform.groupBy = ["<X-field>"], transform.aggregates = [] (the engine
+     returns one row per distinct value; the NUMBER OF RESULT ROWS is the answer).
+   - "<count/total/sum/average> ... group by Y" / "... broken down by Y" / "... per Y" →
+     transform.groupBy = ["<Y-field>"], transform.aggregates =
+     [{ "field": "*", "fn": "count", "as": "count" }] (swap "count" for "sum"/"avg"/
+     "min"/"max" over a named numeric field when the query asks for that metric
+     instead of a count).
+   - Plain lists/filters with no grouping or totals → leave transform.groupBy and
+     transform.aggregates as [].
+8. Use sort (list of { "field", "direction" }) when the query asks for ordering,
+   "top N", "most/least", "highest/lowest", or "earliest/latest". direction is
+   "asc" or "desc" (default "asc"; use "desc" for most/highest/latest). Leave sort
+   as [] otherwise.
+9. Fill "reason" on each operation explaining why that contract is needed.
 
 OUTPUT
 If supported = true:
@@ -176,6 +201,53 @@ If supported = false:
   - markdown = null
   - plan     = null
 """;
+    }
+}
+
+// ─── Contract retriever ───────────────────────────────────────────────────────
+// Narrows the registry to the contracts relevant to a query before they go into
+// an LLM prompt, so prompt size stays flat as the catalog of registered services
+// grows. PlanValidator always re-checks operations against the FULL registry
+// (registry.GetAll()), so narrowing here only trims prompt noise — it can never
+// let an unvetted service slip past validation.
+internal static class ContractRetriever
+{
+    // Below this size, just send the whole registry — narrowing only pays off
+    // once the catalog is big enough that prompt size/noise become a problem.
+    private const int NarrowingThreshold = 6;
+
+    internal static List<ServiceContractEntry> Select(string query, IReadOnlyList<ServiceContractEntry> all)
+    {
+        if (all.Count <= NarrowingThreshold)
+            return all.ToList();
+
+        var q = query.ToLowerInvariant();
+
+        // Required contracts are foundational (e.g. they usually anchor a join)
+        // so they're always retained; optional contracts are added when the
+        // query's words overlap with the contract's name/fields/purpose.
+        var selected = all
+            .Where(c => c.IsRequired || Score(q, c) > 0)
+            .OrderByDescending(c => Score(q, c))
+            .ToList();
+
+        if (selected.Count == 0)
+            selected = all.Where(c => c.IsRequired).ToList();
+        if (selected.Count == 0)
+            selected = all.Take(1).ToList();
+
+        return selected;
+    }
+
+    private static int Score(string q, ServiceContractEntry c)
+    {
+        var words = new[] { c.Name, c.DisplayName }
+            .Concat(c.Fields)
+            .Concat(c.Purpose.Split(' '))
+            .Select(w => w.ToLowerInvariant())
+            .Where(w => w.Length > 2)
+            .Distinct();
+        return words.Count(w => q.Contains(w));
     }
 }
 
@@ -339,7 +411,7 @@ public class GeminiPlanGenerator(IConfiguration config, IServiceRegistry registr
 
     private string BuildPrompt(string query)
     {
-        var contracts = registry.GetAll();
+        var contracts = ContractRetriever.Select(query, registry.GetAll());
         var coreInstructions = PromptBuilder.CoreInstructions(contracts);
         var responseShape = PromptBuilder.ResponseShape(contracts);
         var asOfDate = DateTime.UtcNow.ToString("yyyy-MM-dd");
@@ -505,6 +577,27 @@ public class OpenAiPlanGenerator(IConfiguration config, IServiceRegistry registr
                     "additionalProperties": false
                   }
                 },
+                "transform": {
+                  "type": "object",
+                  "properties": {
+                    "groupBy": { "type": "array", "items": { "type": "string" } },
+                    "aggregates": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "field": { "type": "string" },
+                          "fn":    { "type": "string" },
+                          "as":    { "type": "string" }
+                        },
+                        "required": ["field", "fn", "as"],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["groupBy", "aggregates"],
+                  "additionalProperties": false
+                },
                 "output": {
                   "type": "object",
                   "properties": {
@@ -516,6 +609,18 @@ public class OpenAiPlanGenerator(IConfiguration config, IServiceRegistry registr
                   "required": ["includeClassifications"],
                   "additionalProperties": false
                 },
+                "sort": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "field":     { "type": "string" },
+                      "direction": { "type": "string" }
+                    },
+                    "required": ["field", "direction"],
+                    "additionalProperties": false
+                  }
+                },
                 "limits": {
                   "type": "object",
                   "properties": {
@@ -526,7 +631,7 @@ public class OpenAiPlanGenerator(IConfiguration config, IServiceRegistry registr
                   "additionalProperties": false
                 }
               },
-              "required": ["version", "intent", "entities", "primaryEntity", "operations", "output", "limits"],
+              "required": ["version", "intent", "entities", "primaryEntity", "operations", "transform", "output", "sort", "limits"],
               "additionalProperties": false
             },
             { "type": "null" }
@@ -544,7 +649,7 @@ public class OpenAiPlanGenerator(IConfiguration config, IServiceRegistry registr
         {
             var systemPrompt =
                 "You are a governed analytics plan generator over the registered service contracts below.\n\n" +
-                PromptBuilder.CoreInstructions(registry.GetAll());
+                PromptBuilder.CoreInstructions(ContractRetriever.Select(query, registry.GetAll()));
 
             var completion = await _client.CompleteChatAsync(
                 [new SystemChatMessage(systemPrompt), new UserChatMessage(query)],
@@ -620,7 +725,7 @@ public class OpenRouterPlanGenerator(IConfiguration config, IServiceRegistry reg
         var attemptTimeout = TimeSpan.FromSeconds(75);
         var retryDelay = TimeSpan.FromMinutes(1);
 
-        var contracts = registry.GetAll();
+        var contracts = ContractRetriever.Select(query, registry.GetAll());
         var systemPrompt =
             "You are a governed analytics plan generator over the registered service contracts below.\n\n" +
             PromptBuilder.CoreInstructions(contracts) +

@@ -12,11 +12,12 @@ public record ExecutionOutput(
     QuerySummary Summary,
     List<Dictionary<string, object?>> Rows,
     Dictionary<string, List<Dictionary<string, object?>>> Datasets,
-    List<string> ServicesCalled);
+    List<string> ServicesCalled,
+    string? NextPageToken = null);
 
 public interface IExecutionEngine
 {
-    Task<ExecutionOutput> ExecuteAsync(ExecutionPlan plan, UserContext userContext);
+    Task<ExecutionOutput> ExecuteAsync(ExecutionPlan plan, UserContext userContext, int offset = 0);
 }
 
 public class ExecutionEngine : IExecutionEngine
@@ -38,12 +39,22 @@ public class ExecutionEngine : IExecutionEngine
         };
     }
 
-    public async Task<ExecutionOutput> ExecuteAsync(ExecutionPlan plan, UserContext userContext)
+    public async Task<ExecutionOutput> ExecuteAsync(ExecutionPlan plan, UserContext userContext, int offset = 0)
     {
         if (userContext.Roles.Count == 0)
             throw new UnauthorizedAccessException("User has no assigned roles.");
 
         var correlate = plan.Correlate ?? new PlanCorrelate();
+
+        // Fields the plan actually asked for, per service — drives projection so
+        // the response carries only the columns the query needs, not full DTOs.
+        var selectByService = plan.Operations
+            .Where(op => !string.IsNullOrWhiteSpace(op.Service) && op.Select is { Count: > 0 })
+            .GroupBy(op => op.Service, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                g => g.Key,
+                g => (IReadOnlySet<string>)g.SelectMany(op => op.Select).ToHashSet(StringComparer.OrdinalIgnoreCase),
+                StringComparer.OrdinalIgnoreCase);
 
         // ── Fetch & filter every contract referenced in the plan ──────────────
         var rawByService = new Dictionary<string, List<object>>(StringComparer.OrdinalIgnoreCase);
@@ -70,7 +81,9 @@ public class ExecutionEngine : IExecutionEngine
         // ── Project raw data into dictionaries for the response ───────────────
         var datasets = rawByService.ToDictionary(
             kvp => kvp.Key,
-            kvp => kvp.Value.Select(ToDict).ToList());
+            kvp => kvp.Value.Select(o => ToDict(o, selectByService.GetValueOrDefault(kvp.Key))).ToList());
+
+        string? nextPageToken = null;
 
         // ── Build the Results list. Two modes:
         //    • Classification mode (timeliness query): rows are dicts of the
@@ -107,6 +120,15 @@ public class ExecutionEngine : IExecutionEngine
                     .Where(g => g.Key != null)
                     .ToDictionary(g => g.Key!, g => ApplyDateAggregate(g.Cast<object>(), aggregate.Field, aggregate.Fn));
 
+                // Same grouping, but keeping the raw sibling records (not just the
+                // aggregated date) so ClassifyRecord can explain *why* a study has
+                // no actual completion yet — e.g. pending vs. failed TestPs —
+                // instead of only reporting the date comparison.
+                var recordsByKey = rightRows
+                    .GroupBy(r => GetStringField(r, rightIdField))
+                    .Where(g => g.Key != null)
+                    .ToDictionary(g => g.Key!, g => (IEnumerable<object>)g.Cast<object>().ToList());
+
                 // Decide which entity the classification is *attributed to*.
                 // Default = the side that owns plannedCompletionDate (leftService).
                 // If the plan declares a primaryEntity that matches another fetched
@@ -116,6 +138,7 @@ public class ExecutionEngine : IExecutionEngine
                                      && rawByService.ContainsKey(plan.PrimaryEntity)
                     ? plan.PrimaryEntity
                     : leftService;
+                var allowedFields = selectByService.GetValueOrDefault(primaryService);
 
                 List<Dictionary<string, object?>> allClassified;
                 if (string.Equals(primaryService, leftService, StringComparison.OrdinalIgnoreCase))
@@ -124,7 +147,8 @@ public class ExecutionEngine : IExecutionEngine
                     {
                         var key = GetStringField(s, leftIdField);
                         completionByKey.TryGetValue(key ?? "", out var actual);
-                        return ClassifyRecord(s, parent: s, actual);
+                        var siblings = recordsByKey.GetValueOrDefault(key ?? "");
+                        return ClassifyRecord(s, parent: s, actual, siblings, allowedFields);
                     }).ToList();
                 }
                 else
@@ -141,7 +165,8 @@ public class ExecutionEngine : IExecutionEngine
                         var parentKey = GetStringField(p, leftIdField);
                         completionByKey.TryGetValue(parentKey ?? "", out var actual);
                         parentByKey.TryGetValue(parentKey ?? "", out var parent);
-                        return ClassifyRecord(p, parent, actual);
+                        var siblings = recordsByKey.GetValueOrDefault(parentKey ?? "");
+                        return ClassifyRecord(p, parent, actual, siblings, allowedFields);
                     }).ToList();
                 }
 
@@ -150,11 +175,12 @@ public class ExecutionEngine : IExecutionEngine
                     allClassified.Count(r => Equals(r.GetValueOrDefault("classification"), "Delayed")),
                     allClassified.Count(r => Equals(r.GetValueOrDefault("classification"), "Indeterminate")));
 
-                rows = allClassified
+                var matching = allClassified
                     .Where(r => plan.Output.IncludeClassifications.Contains(
                         r.GetValueOrDefault("classification")?.ToString() ?? ""))
-                    .Take(plan.Limits.MaxRows)
                     .ToList();
+                ApplySort(matching, plan.Sort);
+                (rows, nextPageToken) = Paginate(matching, offset, plan.Limits.MaxRows);
             }
         }
 
@@ -211,12 +237,29 @@ public class ExecutionEngine : IExecutionEngine
                         allowedKeys.Contains(GetStringField(p, joinField) ?? ""));
                 }
 
-                rows = filtered.Take(plan.Limits.MaxRows).Select(ToDict).ToList();
+                // groupBy turns "total / count / breakdown by X" queries into one row
+                // per distinct value of X instead of dumping every raw record — e.g.
+                // groupBy ["legalEntity"] answers "how many legal entities" via the
+                // resulting row count, and groupBy ["sampleType"] answers "samples by
+                // type" directly, without pulling the full table into the UI.
+                if (plan.Transform.GroupBy.Count > 0)
+                {
+                    var grouped = BuildGroupedRows(filtered, plan.Transform.GroupBy, plan.Transform.Aggregates);
+                    ApplySort(grouped, plan.Sort);
+                    (rows, nextPageToken) = Paginate(grouped, offset, plan.Limits.MaxRows);
+                }
+                else
+                {
+                    var allowedFields = selectByService.GetValueOrDefault(primaryService);
+                    var projected = filtered.Select(o => ToDict(o, allowedFields)).ToList();
+                    ApplySort(projected, plan.Sort);
+                    (rows, nextPageToken) = Paginate(projected, offset, plan.Limits.MaxRows);
+                }
             }
         }
 
         var servicesCalled = plan.Operations.Select(o => o.Service).Distinct().ToList();
-        return new ExecutionOutput(summary, rows, datasets, servicesCalled);
+        return new ExecutionOutput(summary, rows, datasets, servicesCalled, nextPageToken);
     }
 
     // ── Generic classification using reflection ───────────────────────────────
@@ -225,10 +268,16 @@ public class ExecutionEngine : IExecutionEngine
     // The dict starts with the record's own fields (preserving declaration order)
     // and appends classification metadata on top. The UI renders columns from the
     // dict keys so nothing in the schema is hard-coded.
-    internal static Dictionary<string, object?> ClassifyRecord(object presentation, object? parent, DateTime? actual)
+    internal static Dictionary<string, object?> ClassifyRecord(
+        object presentation,
+        object? parent,
+        DateTime? actual,
+        IEnumerable<object>? childRecords = null,
+        IReadOnlySet<string>? allowedFields = null)
     {
         var source  = parent ?? presentation;
         var planned = source.GetType().GetProperty("plannedCompletionDate", PropFlags)?.GetValue(source) as DateTime?;
+        var siblings = childRecords?.ToList() ?? [];
 
         var flags  = new List<string>();
         string classification, reason;
@@ -242,14 +291,44 @@ public class ExecutionEngine : IExecutionEngine
         else if (actual is null)
         {
             classification = "Indeterminate";
-            reason = "No actual completion timestamp found.";
-            flags.Add("no_actual_completion");
+            // Distinguish *why* there's no actual completion yet — pending TestPs,
+            // failed TestPs, or no TestP records at all — instead of one generic
+            // "no data" reason, so timeliness queries can answer "why is this
+            // delayed" rather than just "is this delayed".
+            var pending = siblings.Count(r => string.Equals(GetStringField(r, "status"), "Pending", StringComparison.OrdinalIgnoreCase));
+            var failed  = siblings.Count(r => string.Equals(GetStringField(r, "result"), "Fail", StringComparison.OrdinalIgnoreCase));
+
+            if (siblings.Count == 0)
+            {
+                reason = "No actual completion timestamp found: no TestP records exist for this study.";
+                flags.Add("no_testp_records");
+            }
+            else
+            {
+                var causes = new List<string>();
+                if (pending > 0) { causes.Add($"{pending} TestP(s) pending"); flags.Add("pending_testp"); }
+                if (failed  > 0) { causes.Add($"{failed} TestP(s) failed");  flags.Add("failed_testp");  }
+
+                reason = causes.Count > 0
+                    ? $"No actual completion timestamp found: {string.Join(", ", causes)}."
+                    : "No actual completion timestamp found despite existing TestP records.";
+                if (causes.Count == 0) flags.Add("no_actual_completion");
+            }
         }
         else if (actual > planned)
         {
             classification = "Delayed";
             var days = (actual.Value.Date - planned.Value.Date).Days;
             reason = $"Actual completion is {days} day(s) after planned.";
+
+            // The study already has an actual completion date (that's how it was
+            // classified Delayed), but still-pending or failed sibling TestPs are
+            // useful context for *why* it ran late or isn't fully closed out.
+            var stillPending = siblings.Count(r => string.Equals(GetStringField(r, "status"), "Pending", StringComparison.OrdinalIgnoreCase));
+            var failed       = siblings.Count(r => string.Equals(GetStringField(r, "result"), "Fail", StringComparison.OrdinalIgnoreCase));
+
+            if (failed > 0) { reason += $" {failed} TestP(s) failed."; flags.Add("failed_testp"); }
+            if (stillPending > 0) { reason += $" {stillPending} TestP(s) still pending."; flags.Add("pending_testp"); }
         }
         else
         {
@@ -257,20 +336,22 @@ public class ExecutionEngine : IExecutionEngine
             reason = "Actual completion is on or before planned.";
         }
 
-        var row = ToDict(presentation);
+        var row = ToDict(presentation, allowedFields);
         // When primary differs from parent, surface parent customer/code so the
         // user can still see which study a testp/sample belongs to.
         if (!ReferenceEquals(presentation, parent) && parent is not null)
         {
             foreach (var key in new[] { "studyCode", "customer" })
             {
-                if (!row.ContainsKey(key))
+                if (!row.ContainsKey(key) && (allowedFields is null || allowedFields.Count == 0 || allowedFields.Contains(key)))
                 {
                     var val = GetStringField(parent, key);
                     if (val is not null) row[key] = val;
                 }
             }
         }
+        // Classification fields are the literal answer to a timeliness query, so
+        // they're always included regardless of the plan's column projection.
         row["plannedCompletionDate"] = planned;
         row["actualCompletionDate"]  = actual;
         row["classification"]        = classification;
@@ -324,7 +405,10 @@ public class ExecutionEngine : IExecutionEngine
     {
         if (string.IsNullOrWhiteSpace(fieldVal)) return false;
         var values = ParseFilterValues(filterVal).ToList();
-        if (values.Count < 2) return true;
+        // Fail closed: a "between" filter needs two bounds. A single value is an
+        // incomplete plan, not "no constraint" — matching everything would
+        // silently return unfiltered data instead of surfacing the bad plan.
+        if (values.Count < 2) return false;
         return CompareValues(fieldVal, values[0]) >= 0 && CompareValues(fieldVal, values[1]) <= 0;
     }
 
@@ -386,15 +470,106 @@ public class ExecutionEngine : IExecutionEngine
     private static string? GetStringField(object obj, string field) =>
         obj.GetType().GetProperty(field, PropFlags)?.GetValue(obj)?.ToString();
 
-    private static Dictionary<string, object?> ToDict(object obj)
+    // Projects an object to only the fields the plan selected for its service —
+    // a null/empty allow-set means "no projection requested", so every property
+    // is included (used internally, e.g. by tests and dataset transparency views).
+    private static Dictionary<string, object?> ToDict(object obj, IReadOnlySet<string>? allow = null)
     {
         var dict = new Dictionary<string, object?>();
         foreach (var p in obj.GetType().GetProperties(PropFlags))
         {
             var name = char.ToLowerInvariant(p.Name[0]) + p.Name[1..];
+            if (allow is { Count: > 0 } && !allow.Contains(name)) continue;
             dict[name] = p.GetValue(obj);
         }
         return dict;
+    }
+
+    // ── Grouping / aggregation (non-classification "count/total/breakdown by X") ─
+
+    private static List<Dictionary<string, object?>> BuildGroupedRows(
+        IEnumerable<object> rows, List<string> groupBy, List<PlanAggregate> aggregates)
+    {
+        List<PlanAggregate> effectiveAggregates = aggregates.Count > 0
+            ? aggregates
+            : [new PlanAggregate(groupBy[0], "count", "count")];
+
+        return rows
+            .GroupBy(r => string.Join("", groupBy.Select(f => GetStringField(r, f) ?? "")))
+            .Select(g =>
+            {
+                var dict = new Dictionary<string, object?>();
+                var first = g.First();
+                foreach (var field in groupBy)
+                    dict[field] = GetStringField(first, field);
+                foreach (var agg in effectiveAggregates)
+                    dict[agg.As] = ApplyAggregate(g.Cast<object>(), agg.Field, agg.Fn);
+                return dict;
+            })
+            .ToList();
+    }
+
+    private static object? ApplyAggregate(IEnumerable<object> records, string field, string fn)
+    {
+        var list = records.ToList();
+        if (string.Equals(fn, "count", StringComparison.OrdinalIgnoreCase))
+            return list.Count;
+
+        var raw = list.Select(r => r.GetType().GetProperty(field, PropFlags)?.GetValue(r)).ToList();
+
+        if (raw.Any(v => v is DateTime))
+        {
+            var dates = raw.OfType<DateTime>().ToList();
+            return fn.ToLowerInvariant() switch
+            {
+                "min" => dates.Count > 0 ? dates.Min() : null,
+                "max" => dates.Count > 0 ? dates.Max() : null,
+                _     => dates.Count > 0 ? dates.Max() : (DateTime?)null
+            };
+        }
+
+        var numbers = raw
+            .Select(v => decimal.TryParse(v?.ToString(), out var n) ? n : (decimal?)null)
+            .Where(n => n.HasValue)
+            .Select(n => n!.Value)
+            .ToList();
+
+        return fn.ToLowerInvariant() switch
+        {
+            "sum" => numbers.Sum(),
+            "avg" => numbers.Count > 0 ? numbers.Average() : null,
+            "min" => numbers.Count > 0 ? numbers.Min() : null,
+            "max" => numbers.Count > 0 ? numbers.Max() : null,
+            _     => numbers.Count
+        };
+    }
+
+    // ── Sorting / pagination — applied uniformly after the answer rows are built ─
+
+    private static void ApplySort(List<Dictionary<string, object?>> rows, List<PlanSort> sort)
+    {
+        if (sort.Count == 0 || rows.Count == 0) return;
+        rows.Sort((a, b) =>
+        {
+            foreach (var s in sort)
+            {
+                var cmp = CompareValues(a.GetValueOrDefault(s.Field)?.ToString(), b.GetValueOrDefault(s.Field)?.ToString());
+                if (cmp != 0) return string.Equals(s.Direction, "desc", StringComparison.OrdinalIgnoreCase) ? -cmp : cmp;
+            }
+            return 0;
+        });
+    }
+
+    // Offset-based continuation token: simple and transparent for in-memory data
+    // sources today; the token shape can change to an opaque cursor later without
+    // affecting callers, since they only ever round-trip whatever string we hand back.
+    private static (List<Dictionary<string, object?>> Page, string? NextToken) Paginate(
+        List<Dictionary<string, object?>> all, int offset, int maxRows)
+    {
+        var safeOffset = Math.Max(0, offset);
+        var page = all.Skip(safeOffset).Take(maxRows).ToList();
+        var hasMore = safeOffset + page.Count < all.Count;
+        return (page, hasMore ? (safeOffset + page.Count).ToString() : null);
     }
 
     private static DateTime? ApplyDateAggregate(IEnumerable<object> records, string field, string fn)
