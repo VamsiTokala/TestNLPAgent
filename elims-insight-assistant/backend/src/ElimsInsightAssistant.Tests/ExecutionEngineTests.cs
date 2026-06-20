@@ -46,9 +46,9 @@ public class ExecutionEngineTests
     {
         var studies = new List<StudyDto>
         {
-            new("S1", "ST-001", "Acme",   "EU", new DateTime(2026, 4, 10)),
-            new("S2", "ST-002", "Acme",   "EU", new DateTime(2026, 4, 11)),
-            new("S3", "ST-003", "Globex", "US", new DateTime(2026, 4, 12)),
+            new("S1", "ST-001", "Acme",   "DS-BIOANALYTICS", new DateTime(2026, 4, 10)),
+            new("S2", "ST-002", "Acme",   "DS-BIOANALYTICS", new DateTime(2026, 4, 11)),
+            new("S3", "ST-003", "Globex", "DS-DMPK", new DateTime(2026, 4, 12)),
         };
         var plan = new ExecutionPlan
         {
@@ -57,11 +57,11 @@ public class ExecutionEngineTests
         };
 
         var engine = BuildEngine(studies: studies);
-        var result = await engine.ExecuteAsync(plan, User("EU", "US"));
+        var result = await engine.ExecuteAsync(plan, User("DS-BIOANALYTICS", "DS-DMPK"));
 
         Assert.Equal(2, result.Rows.Count);
-        Assert.Contains(result.Rows, r => Equals(r["legalEntity"], "EU"));
-        Assert.Contains(result.Rows, r => Equals(r["legalEntity"], "US"));
+        Assert.Contains(result.Rows, r => Equals(r["legalEntity"], "DS-BIOANALYTICS"));
+        Assert.Contains(result.Rows, r => Equals(r["legalEntity"], "DS-DMPK"));
     }
 
     [Fact]
@@ -96,8 +96,8 @@ public class ExecutionEngineTests
     {
         var studies = new List<StudyDto>
         {
-            new("S1", "ST-001", "Acme", "EU", new DateTime(2026, 4, 10)),
-            new("S2", "ST-002", "Acme", "EU", new DateTime(2026, 4, 20)),
+            new("S1", "ST-001", "Acme", "DS-BIOANALYTICS", new DateTime(2026, 4, 10)),
+            new("S2", "ST-002", "Acme", "DS-BIOANALYTICS", new DateTime(2026, 4, 20)),
         };
         var plan = new ExecutionPlan
         {
@@ -109,7 +109,7 @@ public class ExecutionEngineTests
         };
 
         var engine = BuildEngine(studies: studies);
-        var result = await engine.ExecuteAsync(plan, User("EU"));
+        var result = await engine.ExecuteAsync(plan, User("DS-BIOANALYTICS"));
 
         Assert.Empty(result.Rows);
     }
@@ -119,8 +119,8 @@ public class ExecutionEngineTests
     {
         var studies = new List<StudyDto>
         {
-            new("S1", "ST-001", "Acme", "EU", new DateTime(2026, 4, 10)),
-            new("S2", "ST-002", "Acme", "EU", new DateTime(2026, 5, 20)),
+            new("S1", "ST-001", "Acme", "DS-BIOANALYTICS", new DateTime(2026, 4, 10)),
+            new("S2", "ST-002", "Acme", "DS-BIOANALYTICS", new DateTime(2026, 5, 20)),
         };
         var plan = new ExecutionPlan
         {
@@ -132,7 +132,7 @@ public class ExecutionEngineTests
         };
 
         var engine = BuildEngine(studies: studies);
-        var result = await engine.ExecuteAsync(plan, User("EU"));
+        var result = await engine.ExecuteAsync(plan, User("DS-BIOANALYTICS"));
 
         Assert.Single(result.Rows);
         Assert.Equal("S1", result.Rows[0]["studyId"]);
@@ -145,9 +145,9 @@ public class ExecutionEngineTests
     {
         var studies = new List<StudyDto>
         {
-            new("S1", "ST-001", "Acme", "EU", new DateTime(2026, 4, 10)),
-            new("S2", "ST-002", "Acme", "EU", new DateTime(2026, 4, 20)),
-            new("S3", "ST-003", "Acme", "EU", new DateTime(2026, 4, 15)),
+            new("S1", "ST-001", "Acme", "DS-BIOANALYTICS", new DateTime(2026, 4, 10)),
+            new("S2", "ST-002", "Acme", "DS-BIOANALYTICS", new DateTime(2026, 4, 20)),
+            new("S3", "ST-003", "Acme", "DS-BIOANALYTICS", new DateTime(2026, 4, 15)),
         };
         var plan = new ExecutionPlan
         {
@@ -156,7 +156,7 @@ public class ExecutionEngineTests
         };
 
         var engine = BuildEngine(studies: studies);
-        var result = await engine.ExecuteAsync(plan, User("EU"));
+        var result = await engine.ExecuteAsync(plan, User("DS-BIOANALYTICS"));
 
         Assert.Equal(["S2", "S3", "S1"], result.Rows.Select(r => r["studyId"]));
     }
@@ -167,7 +167,7 @@ public class ExecutionEngineTests
     public async Task Pagination_RoundTripsAcrossPagesViaNextPageToken()
     {
         var studies = Enumerable.Range(1, 5)
-            .Select(i => new StudyDto($"S{i}", $"ST-00{i}", "Acme", "EU", new DateTime(2026, 4, i + 1)))
+            .Select(i => new StudyDto($"S{i}", $"ST-00{i}", "Acme", "DS-BIOANALYTICS", new DateTime(2026, 4, i + 1)))
             .ToList();
         var plan = new ExecutionPlan
         {
@@ -178,15 +178,15 @@ public class ExecutionEngineTests
 
         var engine = BuildEngine(studies: studies);
 
-        var page1 = await engine.ExecuteAsync(plan, User("EU"), offset: 0);
+        var page1 = await engine.ExecuteAsync(plan, User("DS-BIOANALYTICS"), offset: 0);
         Assert.Equal(["S1", "S2"], page1.Rows.Select(r => r["studyId"]));
         Assert.Equal("2", page1.NextPageToken);
 
-        var page2 = await engine.ExecuteAsync(plan, User("EU"), offset: int.Parse(page1.NextPageToken!));
+        var page2 = await engine.ExecuteAsync(plan, User("DS-BIOANALYTICS"), offset: int.Parse(page1.NextPageToken!));
         Assert.Equal(["S3", "S4"], page2.Rows.Select(r => r["studyId"]));
         Assert.Equal("4", page2.NextPageToken);
 
-        var page3 = await engine.ExecuteAsync(plan, User("EU"), offset: int.Parse(page2.NextPageToken!));
+        var page3 = await engine.ExecuteAsync(plan, User("DS-BIOANALYTICS"), offset: int.Parse(page2.NextPageToken!));
         Assert.Equal(["S5"], page3.Rows.Select(r => r["studyId"]));
         Assert.Null(page3.NextPageToken);
     }
@@ -196,14 +196,14 @@ public class ExecutionEngineTests
     [Fact]
     public async Task Projection_LimitsRowsToSelectedFields()
     {
-        var studies = new List<StudyDto> { new("S1", "ST-001", "Acme", "EU", new DateTime(2026, 4, 10)) };
+        var studies = new List<StudyDto> { new("S1", "ST-001", "Acme", "DS-BIOANALYTICS", new DateTime(2026, 4, 10)) };
         var plan = new ExecutionPlan
         {
             Operations = [new PlanOperation("study-service", "listStudies", ["studyId", "customer"], [])]
         };
 
         var engine = BuildEngine(studies: studies);
-        var result = await engine.ExecuteAsync(plan, User("EU"));
+        var result = await engine.ExecuteAsync(plan, User("DS-BIOANALYTICS"));
 
         Assert.Single(result.Rows);
         Assert.Equal(new HashSet<string> { "studyId", "customer" }, result.Rows[0].Keys.ToHashSet());

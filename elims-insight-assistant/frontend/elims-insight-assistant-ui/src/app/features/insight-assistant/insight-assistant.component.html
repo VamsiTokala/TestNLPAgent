@@ -6,6 +6,17 @@
     <p class="subtitle">Governed Natural-Language Analytics</p>
   </div>
 
+  <!-- Access scope strip -->
+  <div class="scope-strip">
+    <span class="scope-label">Access scope:</span>
+    <span class="scope-chip scope-chip--allowed" *ngFor="let le of authorizedLegalEntities">{{ le }}</span>
+    <span class="scope-divider" *ngIf="restrictedLegalEntities.length">·</span>
+    <span class="scope-label" *ngIf="restrictedLegalEntities.length">Restricted:</span>
+    <span class="scope-chip scope-chip--locked" *ngFor="let le of restrictedLegalEntities" title="Not in this user's authorized legal entities — excluded from every query result">
+      🔒 {{ le }}
+    </span>
+  </div>
+
   <!-- Service Catalogue -->
   <div class="catalogue-card">
     <div class="catalogue-header">
@@ -161,6 +172,39 @@
         <span class="ai-bar-provider">{{ response.planGeneratorMode }}</span>
       </div>
 
+      <!-- Execution metadata strip — bounded execution, not a data dump -->
+      <div class="exec-strip">
+        <span>Returned <strong>{{ response.results.length }}</strong> row{{ response.results.length !== 1 ? 's' : '' }}</span>
+        <span class="exec-sep">·</span>
+        <span>Max rows <strong>{{ response.jsonPlan.limits.maxRows }}</strong></span>
+        <span class="exec-sep">·</span>
+        <span>Services called: <strong>{{ calledServiceNames() || '—' }}</strong></span>
+        <span class="exec-sep">·</span>
+        <span>Projection: <strong>{{ resultsColumns().length }} field{{ resultsColumns().length !== 1 ? 's' : '' }}</strong> selected</span>
+      </div>
+
+      <!-- How I answered this — collapsed explainability panel -->
+      <details class="explain-card">
+        <summary>How I answered this</summary>
+        <div class="explain-body">
+          <div class="explain-row"><span class="explain-key">Plan ID</span><span class="explain-val">{{ response.planId }}</span></div>
+          <div class="explain-row"><span class="explain-key">Trace ID</span><span class="explain-val">{{ response.traceId }}</span></div>
+          <div class="explain-row"><span class="explain-key">Provider</span><span class="explain-val">{{ response.planGeneratorMode }}</span></div>
+          <div class="explain-row"><span class="explain-key">Services selected</span><span class="explain-val">{{ response.jsonPlan.operations.length ? '' : '—' }}<span class="ai-bar-svc" *ngFor="let op of response.jsonPlan.operations">{{ op.service }}</span></span></div>
+          <div class="explain-row"><span class="explain-key">Validation checks</span>
+            <span class="explain-val">
+              <span class="check-chip" *ngFor="let c of response.validation.checks" [class.failed]="c.status !== 'Passed'">
+                {{ c.status === 'Passed' ? '✓' : '✗' }} {{ c.name }}
+              </span>
+            </span>
+          </div>
+          <div class="explain-row explain-row--block" *ngIf="response.markdownPlan">
+            <span class="explain-key">Plan</span>
+            <pre class="explain-markdown">{{ response.markdownPlan }}</pre>
+          </div>
+        </div>
+      </details>
+
       <!-- Summary — only relevant for timeliness queries -->
       <div class="summary-grid" *ngIf="hasClassifications()">
         <div class="stat-card on-time">
@@ -177,8 +221,29 @@
         </div>
       </div>
 
-      <!-- Results table -->
-      <div class="results-card">
+      <!-- Results: grouped/summary cards -->
+      <div class="results-card" *ngIf="isGroupedResult()">
+        <div class="results-header">
+          <h4>Summary</h4>
+          <span class="count-badge">{{ response.results.length }}</span>
+        </div>
+        <div class="summary-cards-grid" *ngIf="response.results.length > 0; else noGroupResults">
+          <div class="group-card" *ngFor="let r of response.results">
+            <div class="group-card-label">{{ r[groupLabelColumn()!] }}</div>
+            <div class="group-card-metrics">
+              <span class="group-metric" *ngFor="let col of groupMetricColumns()">
+                <strong>{{ formatCell(r[col]) }}</strong> {{ prettyHeader(col) }}
+              </span>
+            </div>
+          </div>
+        </div>
+        <ng-template #noGroupResults>
+          <div class="empty-state">No results match the current filter.</div>
+        </ng-template>
+      </div>
+
+      <!-- Results: row-level table (classification / list / filter queries) -->
+      <div class="results-card" *ngIf="!isGroupedResult()">
         <div class="results-header">
           <h4>Results</h4>
           <span class="count-badge">{{ response.results.length }}</span>
@@ -187,24 +252,38 @@
           <thead>
             <tr>
               <th *ngFor="let col of resultsColumns()">{{ prettyHeader(col) }}</th>
+              <th class="th-detail" *ngIf="response.results[0] && rowHasDetail(response.results[0])"></th>
             </tr>
           </thead>
           <tbody>
-            <tr *ngFor="let r of response.results">
-              <ng-container *ngFor="let col of resultsColumns()">
-                <td *ngIf="isClassificationColumn(col); else plainCell">
-                  <span class="badge"
-                    [class.on-time]="r[col] === 'On Time'"
-                    [class.delayed]="r[col] === 'Delayed'"
-                    [class.indeterminate]="r[col] === 'Indeterminate'">
-                    {{ r[col] }}
-                  </span>
+            <ng-container *ngFor="let r of response.results; let i = index">
+              <tr [class.row--expandable]="rowHasDetail(r)" (click)="rowHasDetail(r) && toggleRow(i)">
+                <ng-container *ngFor="let col of resultsColumns()">
+                  <td *ngIf="isClassificationColumn(col); else plainCell">
+                    <span class="badge"
+                      [class.on-time]="r[col] === 'On Time'"
+                      [class.delayed]="r[col] === 'Delayed'"
+                      [class.indeterminate]="r[col] === 'Indeterminate'">
+                      {{ r[col] }}
+                    </span>
+                  </td>
+                  <ng-template #plainCell>
+                    <td>{{ formatCell(r[col]) }}</td>
+                  </ng-template>
+                </ng-container>
+                <td class="td-detail" *ngIf="rowHasDetail(r)">
+                  <span class="detail-toggle">{{ isRowExpanded(i) ? '▾' : '▸' }}</span>
                 </td>
-                <ng-template #plainCell>
-                  <td>{{ formatCell(r[col]) }}</td>
-                </ng-template>
-              </ng-container>
-            </tr>
+              </tr>
+              <tr class="row-detail" *ngIf="rowHasDetail(r) && isRowExpanded(i)">
+                <td [attr.colspan]="resultsColumns().length + 1">
+                  <div class="detail-line" *ngIf="r['reason']"><strong>Reason:</strong> {{ formatCell(r['reason']) }}</div>
+                  <div class="detail-line" *ngIf="hasFlags(r)">
+                    <strong>Data quality flags:</strong> {{ formatCell(r['dataQualityFlags']) }}
+                  </div>
+                </td>
+              </tr>
+            </ng-container>
           </tbody>
         </table>
         <ng-template #noResults>

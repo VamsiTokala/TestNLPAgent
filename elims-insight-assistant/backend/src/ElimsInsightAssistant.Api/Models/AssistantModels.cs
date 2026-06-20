@@ -135,10 +135,17 @@ public record PlanOutput(List<string>? IncludeClassifications = null, List<strin
 }
 public record PlanLimits(int MaxRows, bool Pagination);
 
-public record StudyDto(string StudyId, string StudyCode, string Customer, string LegalEntity, DateTime? PlannedCompletionDate);
-public record TestPDto(string TestpId, string StudyId, string Status, DateTime? CompletedAt, string RunType, string? Result);
+public record StudyDto(
+    string StudyId, string StudyCode, string Customer, string LegalEntity, DateTime? PlannedCompletionDate,
+    string? AssayType = null, string? Priority = null, string? StudyStatus = null,
+    string? LabSite = null, string? StudyOwner = null);
+public record TestPDto(
+    string TestpId, string StudyId, string Status, DateTime? CompletedAt, string RunType, string? Result,
+    string? QcStatus = null, string? Instrument = null, string? FailureReason = null);
 public record ProtocolDto(string ProtocolId, string StudyId, string Version, string Status, DateTime? ApprovedAt, DateTime? ExpiresAt);
-public record SampleDto(string SampleId, string StudyId, string SampleType, string Status, DateTime? CollectedAt, string CollectionSite);
+public record SampleDto(
+    string SampleId, string StudyId, string SampleType, string Status, DateTime? CollectedAt, string CollectionSite,
+    DateTime? ReceivedAt = null);
 
 public record AuditRecord
 {

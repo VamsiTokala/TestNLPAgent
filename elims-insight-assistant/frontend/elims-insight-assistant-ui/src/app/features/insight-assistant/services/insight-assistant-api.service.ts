@@ -17,7 +17,9 @@ export class InsightAssistantApiService {
       userContext: {
         userId: 'demo-user',
         roles: ['DataViewer'],
-        legalEntities: ['EU', 'US']
+        // eLIMS business/legal operating scopes this demo user is authorized for —
+        // DS-TOX is intentionally excluded to demonstrate legal-entity access boundaries.
+        legalEntities: ['DS-BIOANALYTICS', 'DS-DMPK', 'DS-IN-VITRO']
       }
     });
   }
