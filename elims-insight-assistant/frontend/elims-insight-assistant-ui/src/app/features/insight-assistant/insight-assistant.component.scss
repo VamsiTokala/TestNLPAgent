@@ -30,6 +30,19 @@ $slate-900: #0f172a;
   }
 }
 
+// ── Access scope strip ────────────────────────────────────────────────────────
+.scope-strip {
+  display: flex; align-items: center; flex-wrap: wrap; gap: .4rem;
+  margin-bottom: 1rem; font-size: .75rem;
+}
+.scope-label { color: $slate-500; font-weight: 600; }
+.scope-divider { color: $slate-400; }
+.scope-chip {
+  font-family: monospace; font-weight: 700; padding: .15rem .55rem; border-radius: 999px;
+  &.scope-chip--allowed { background: #dcfce7; color: #166534; }
+  &.scope-chip--locked  { background: $slate-100; color: $slate-400; text-decoration: line-through; }
+}
+
 // ── Cards shared ──────────────────────────────────────────────────────────────
 .catalogue-card, .query-card, .results-card {
   background: #fff;
@@ -292,6 +305,65 @@ $slate-900: #0f172a;
   background: #312e81; color: #e0e7ff; padding: .18rem .6rem; border-radius: 999px;
   margin-left: auto;
 }
+
+// ── Execution metadata strip ──────────────────────────────────────────────────
+.exec-strip {
+  display: flex; align-items: center; flex-wrap: wrap; gap: .4rem;
+  font-size: .75rem; color: $slate-500;
+  background: $slate-50; border: 1px solid $slate-200; border-radius: 9px;
+  padding: .5rem .9rem; margin-bottom: 1rem;
+  strong { color: $slate-700; }
+}
+.exec-sep { color: $slate-400; }
+
+// ── How I answered this ───────────────────────────────────────────────────────
+.explain-card {
+  background: #fff; border: 1px solid $slate-200; border-radius: 10px;
+  padding: .75rem 1rem; font-size: .8rem; color: $slate-500;
+  margin-bottom: 1rem; animation: slideUp .3s ease;
+  summary { cursor: pointer; font-weight: 600; user-select: none; list-style: none; color: $slate-700; }
+}
+.explain-body { margin-top: .75rem; display: flex; flex-direction: column; gap: .5rem; }
+.explain-row {
+  display: flex; gap: .75rem; align-items: baseline; flex-wrap: wrap;
+  &.explain-row--block { flex-direction: column; align-items: stretch; }
+}
+.explain-key {
+  font-size: .68rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  color: $slate-400; min-width: 8.5rem; flex-shrink: 0;
+}
+.explain-val { font-family: monospace; font-size: .78rem; color: $slate-700; }
+.explain-markdown {
+  margin: .35rem 0 0; background: $slate-50; border: 1px solid $slate-200;
+  border-radius: 6px; padding: .65rem .8rem; font-size: .75rem;
+  white-space: pre-wrap; word-break: break-word; color: $slate-700;
+}
+.check-chip {
+  display: inline-block; font-size: .7rem; font-weight: 600; margin: .1rem .3rem .1rem 0;
+  padding: .12rem .5rem; border-radius: 999px; background: #dcfce7; color: #166534;
+  &.failed { background: #fee2e2; color: #991b1b; }
+}
+
+// ── Summary cards (grouped results) ───────────────────────────────────────────
+.summary-cards-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: .75rem;
+}
+.group-card {
+  border: 1px solid $slate-200; border-radius: 10px; padding: .85rem 1rem;
+  background: $slate-50; animation: slideUp .3s ease;
+}
+.group-card-label { font-weight: 700; font-size: .9rem; color: $slate-900; margin-bottom: .4rem; }
+.group-card-metrics { display: flex; flex-direction: column; gap: .2rem; }
+.group-metric { font-size: .78rem; color: $slate-600; strong { color: $slate-900; font-size: .95rem; margin-right: .25rem; } }
+
+// ── Expandable row detail ─────────────────────────────────────────────────────
+.row--expandable { cursor: pointer; }
+.td-detail { width: 1.5rem; text-align: center; }
+.detail-toggle { color: $slate-400; font-size: .8rem; }
+.row-detail td {
+  background: $slate-50; padding: .5rem .7rem .65rem; border-bottom: 1px solid $slate-100;
+}
+.detail-line { font-size: .78rem; color: $slate-600; & + .detail-line { margin-top: .25rem; } }
 
 // ── Summary cards ─────────────────────────────────────────────────────────────
 .summary-grid {

@@ -12,6 +12,12 @@ const DEFAULT_PROVIDERS: ProviderInfo[] = [
   { id: 'openrouter', name: 'OpenRouter', available: false }
 ];
 
+// Mirrors the demo user's legalEntities in InsightAssistantApiService.query() —
+// kept separate so the UI can show the full eLIMS scope catalogue, not just
+// the ones the user happens to be authorized for.
+const ALL_LEGAL_ENTITIES = ['DS-BIOANALYTICS', 'DS-DMPK', 'DS-IN-VITRO', 'DS-TOX'];
+const AUTHORIZED_LEGAL_ENTITIES = ['DS-BIOANALYTICS', 'DS-DMPK', 'DS-IN-VITRO'];
+
 @Component({
   standalone: true,
   selector: 'app-insight-assistant',
@@ -20,6 +26,10 @@ const DEFAULT_PROVIDERS: ProviderInfo[] = [
   imports: [ReactiveFormsModule, NgFor, NgIf, JsonPipe]
 })
 export class InsightAssistantComponent implements OnInit {
+  authorizedLegalEntities = AUTHORIZED_LEGAL_ENTITIES;
+  restrictedLegalEntities = ALL_LEGAL_ENTITIES.filter(le => !AUTHORIZED_LEGAL_ENTITIES.includes(le));
+
+  expandedRows = new Set<number>();
   examples = [
     'Find studies not completed on time',
     'Show delayed studies',
@@ -54,6 +64,10 @@ export class InsightAssistantComponent implements OnInit {
     return new Set(this.response?.jsonPlan?.operations?.map(op => op.service) ?? []).size;
   }
 
+  calledServiceNames(): string {
+    return [...new Set(this.response?.jsonPlan?.operations?.map(op => op.service) ?? [])].join(', ');
+  }
+
   get datasetEntries(): Array<{ service: string; rows: Array<{ [field: string]: unknown }> }> {
     const datasets = this.response?.datasets ?? {};
     return Object.keys(datasets)
@@ -86,6 +100,38 @@ export class InsightAssistantComponent implements OnInit {
   isClassificationColumn(col: string): boolean { return col === 'classification'; }
   isDateColumn(col: string): boolean {
     return /date|at$/i.test(col);
+  }
+
+  // A row has expandable detail (reason / data quality flags) only when the
+  // engine actually computed them — i.e. classification queries.
+  rowHasDetail(row: Record<string, unknown>): boolean {
+    return 'reason' in row || 'dataQualityFlags' in row;
+  }
+
+  hasFlags(row: Record<string, unknown>): boolean {
+    const flags = row['dataQualityFlags'];
+    return Array.isArray(flags) && flags.length > 0;
+  }
+
+  isRowExpanded(i: number): boolean { return this.expandedRows.has(i); }
+  toggleRow(i: number): void {
+    this.expandedRows.has(i) ? this.expandedRows.delete(i) : this.expandedRows.add(i);
+  }
+
+  // True when the plan grouped results (e.g. "summarize by customer") rather
+  // than returning per-record rows — drives the summary-card layout instead
+  // of a flat table.
+  isGroupedResult(): boolean {
+    return (this.response?.jsonPlan?.transform?.groupBy?.length ?? 0) > 0;
+  }
+
+  groupLabelColumn(): string | null {
+    return this.response?.jsonPlan?.transform?.groupBy?.[0] ?? null;
+  }
+
+  groupMetricColumns(): string[] {
+    const labelCol = this.groupLabelColumn();
+    return this.resultsColumns().filter(c => c !== labelCol);
   }
 
   // True only for timeliness queries — i.e. when the engine produced a

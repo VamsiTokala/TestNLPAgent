@@ -70,7 +70,7 @@ internal sealed class FlexibleStringValueConverter : JsonConverter<string?>
     }
 }
 
-public record NaturalLanguageQueryRequest(string Query, UserContext UserContext, string? Provider = null);
+public record NaturalLanguageQueryRequest(string Query, UserContext UserContext, string? Provider = null, string? PageToken = null);
 public record UserContext(string UserId, List<string> Roles, List<string> LegalEntities);
 
 public record AssistantQueryResponse
@@ -85,6 +85,7 @@ public record AssistantQueryResponse
     public QuerySummary Summary { get; init; } = new();
     public List<Dictionary<string, object?>> Results { get; init; } = [];
     public Dictionary<string, List<Dictionary<string, object?>>> Datasets { get; init; } = [];
+    public string? NextPageToken { get; init; }
     public string Message { get; init; } = string.Empty;
 }
 
@@ -113,11 +114,13 @@ public record ExecutionPlan
     public PlanClassificationRules Classify { get; init; } = new();
     public PlanOutput Output { get; init; } = new();
     public PlanLimits Limits { get; init; } = new(500, true);
+    public List<PlanSort> Sort { get; init; } = [];
 }
 
 public record PlanOperation(string Service, string Action, List<string> Select, List<PlanFilter> Filters, string? Reason = null);
 public record PlanFilter(string Field, string Op, [property: JsonConverter(typeof(FlexibleStringValueConverter))] string? Value);
 public record PlanCorrelate(string LeftEntity = "", string RightEntity = "", string LeftField = "", string RightField = "");
+public record PlanSort(string Field, string Direction = "asc");
 public record PlanTransform(List<string>? GroupBy = null, List<PlanAggregate>? Aggregates = null)
 {
     public List<string> GroupBy { get; init; } = GroupBy ?? [];
@@ -132,10 +135,17 @@ public record PlanOutput(List<string>? IncludeClassifications = null, List<strin
 }
 public record PlanLimits(int MaxRows, bool Pagination);
 
-public record StudyDto(string StudyId, string StudyCode, string Customer, string LegalEntity, DateTime? PlannedCompletionDate);
-public record TestPDto(string TestpId, string StudyId, string Status, DateTime? CompletedAt, string RunType, string? Result);
+public record StudyDto(
+    string StudyId, string StudyCode, string Customer, string LegalEntity, DateTime? PlannedCompletionDate,
+    string? AssayType = null, string? Priority = null, string? StudyStatus = null,
+    string? LabSite = null, string? StudyOwner = null);
+public record TestPDto(
+    string TestpId, string StudyId, string Status, DateTime? CompletedAt, string RunType, string? Result,
+    string? QcStatus = null, string? Instrument = null, string? FailureReason = null);
 public record ProtocolDto(string ProtocolId, string StudyId, string Version, string Status, DateTime? ApprovedAt, DateTime? ExpiresAt);
-public record SampleDto(string SampleId, string StudyId, string SampleType, string Status, DateTime? CollectedAt, string CollectionSite);
+public record SampleDto(
+    string SampleId, string StudyId, string SampleType, string Status, DateTime? CollectedAt, string CollectionSite,
+    DateTime? ReceivedAt = null);
 
 public record AuditRecord
 {
