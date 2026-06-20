@@ -134,6 +134,16 @@ CLASSIFICATION RULES (use ONLY when the query is about completion timeliness):
 - "Delayed":        actualCompletionDate >  plannedCompletionDate (both present)
 - "Indeterminate":  plannedCompletionDate is null OR actualCompletionDate is null
 
+TIMELINESS DATA DERIVATION
+- actualCompletionDate is a derived value, not a source field on study-service.
+- Derive actualCompletionDate from corelabs-service by taking max(completedAt)
+    per studyId from listTestPs records.
+- For study timeliness questions such as delayed, late, overdue, not on time,
+    or not completed on time, set supported=true and include BOTH study-service
+    and corelabs-service correlated on studyId.
+- Do not mark a timeliness query unsupported just because study-service does not
+    expose actualCompletionDate directly; the execution engine derives it.
+
 BUILDING THE PLAN
 1. Pick ONLY the contracts whose data the query actually needs. Do not include
    unrelated contracts. For a join, include both sides on a shared field.
